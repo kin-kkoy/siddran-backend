@@ -19,7 +19,24 @@ router.post('/register', async (req, res) => {
              RETURNING id, username`, [username, hashPass]
         );
 
-        res.status(201).json(newUser.rows[0]);
+        // create token asap to auto login
+        try {
+            const payload = {
+                id: newUser.rows[0].id,
+                username: newUser.rows[0].username
+            }
+
+            const token = jwt.sign(payload, process.env.JWT_SECRET, {expiresIn: '1h'})
+
+            res.status(201).json({
+                message: "Registered Successfully",
+                token: token
+            });
+
+        } catch (tokenError) {
+            console.error('Error signing token:', tokenError);
+            res.status(500).json({error: "Couldn't sign token"})
+        }
 
     } catch (error) {
         console.error(`Something went wrong while registering:`, error)
