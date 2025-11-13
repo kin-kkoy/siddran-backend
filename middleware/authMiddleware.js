@@ -9,7 +9,7 @@ const checkAuth = (req, res, next) => {
 
         const token = header.split(' ')[1];
         if(!token) return res.status(401).json({error: "Token deformed"}) 
-
+ 
         const payload = jwt.verify(token, process.env.JWT_SECRET);
         // no need for an if checker since it auto throws error if invalid/expired
 

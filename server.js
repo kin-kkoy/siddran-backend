@@ -5,14 +5,19 @@ const cors = require('cors')
 require('dotenv').config()
 const notesRouter = require('./routes/notes')
 const authRouter = require ('./routes/auth')
+const cookieParser = require('cookie-parser')
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 
 // middlewares
-app.use(cors());
+app.use(cors({
+  origin: 'http://localhost:5173',  // FRONTEND URL
+  credentials: true  // Allow cookies to be sent!
+}));
 app.use(express.json());
+app.use(cookieParser()); // duh parses the cookie
 
 // routes
 app.use('/auth', authRouter);

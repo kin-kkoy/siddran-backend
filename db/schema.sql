@@ -18,6 +18,16 @@ CREATE TABLE notes (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- apparently the refresh token gets it's own table, weird
+CREATE TABLE  refresh_tokens (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token TEXT NOT NULL UNIQUE,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    revoked BOOLEAN DEFAULT FALSE
+);
+
 -- apparently index for faster queries
 CREATE INDEX idx_user_notes ON notes(user_id, created_at DESC);
 CREATE INDEX idx_notes_created_at ON notes(created_at DESC);
