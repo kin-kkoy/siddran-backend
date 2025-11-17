@@ -1,10 +1,11 @@
-// Imports -> App itself -> middlewares -> routes -> port running (backend)
+// Flow: Imports -> App itself -> middlewares -> routes -> port running (backend)
 
 const express = require('express')
 const cors = require('cors')
 require('dotenv').config()
-const notesRouter = require('./routes/notes')
 const authRouter = require ('./routes/auth')
+const notesRouter = require('./routes/notes')
+const notebooksRouter = require('./routes/notebook')
 const cookieParser = require('cookie-parser')
 
 const app = express();
@@ -22,6 +23,7 @@ app.use(cookieParser()); // duh parses the cookie
 // routes
 app.use('/auth', authRouter);
 app.use('/notes', notesRouter);
+app.use('/notebooks', notebooksRouter)
 
 
 // extension of routes

@@ -116,7 +116,6 @@ router.put('/:id', checkAuth, async (req, res) => {
     }
 })
 
-
 // DELETE /notes/:id
 router.delete('/:id', checkAuth, async (req, res) => {
     const {id: noteID} = req.params;
