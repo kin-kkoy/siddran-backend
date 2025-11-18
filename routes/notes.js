@@ -9,7 +9,7 @@ router.get('/', checkAuth, async (req, res) => {
 
     try{
         const result = await pool.query(
-            `SELECT id, title, body, created_at, updated_at
+            `SELECT id, title, body, created_at, updated_at, notebook_id
              FROM notes
              WHERE user_id = $1
              ORDER BY created_at DESC`, [id]
@@ -30,7 +30,7 @@ router.get('/:id', checkAuth, async (req, res) => {
 
     try {
         const result = await pool.query(
-            `SELECT id, title, body, created_at, updated_at
+            `SELECT id, title, body, created_at, updated_at, notebook_id
              FROM notes
              WHERE id = $1
              AND user_id = $2`, [noteID, userID]

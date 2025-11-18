@@ -52,17 +52,22 @@ router.post('/', checkAuth, async (req, res) => {
 
         const notebook = ntbkResult.rows[0]
 
+        let updatedNotes = []
+
         // if noteIds ARRAY exists and actually has contents, move the contents (which are notes) into the notebook
         if(noteIds && noteIds.length > 0){
-            await pool.query(
+            const result = await pool.query(
                 `UPDATE notes 
                  SET notebook_id = $1 
                  WHERE id = ANY($2)
-                 AND user_id=$3`, [notebook.id, noteIds, req.user.id]
+                 AND user_id=$3
+                 RETURNING *`, [notebook.id, noteIds, req.user.id]
             );
+
+            updatedNotes = result.rows // store the updated notes to be sent back to frontend
         }
 
-        res.status(201).json(notebook);
+        res.status(201).json({notebook, updatedNotes});
 
     } catch (error) {
         console.error(`Failed to create notebook: `, error);
