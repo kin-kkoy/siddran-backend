@@ -6,6 +6,7 @@ require('dotenv').config()
 const authRouter = require ('./routes/auth')
 const notesRouter = require('./routes/notes')
 const notebooksRouter = require('./routes/notebook')
+const tasksRouter = require('./routes/tasks')
 const cookieParser = require('cookie-parser')
 
 const app = express();
@@ -24,6 +25,7 @@ app.use(cookieParser()); // duh parses the cookie
 app.use('/auth', authRouter);
 app.use('/notes', notesRouter);
 app.use('/notebooks', notebooksRouter)
+app.use('/tasks', tasksRouter)
 
 
 // extension of routes

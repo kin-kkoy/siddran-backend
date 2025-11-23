@@ -29,6 +29,17 @@ CREATE TABLE notes (
     notebook_id INTEGER REFERENCES notebooks(id) ON DELETE SET NULL -- since optional ra ang ntbks
 );
 
+CREATE TABLE IF NOT EXISTS tasks (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    is_completed BOOLEAN DEFAULT FALSE,
+    priority VARCHAR(10) DEFAULT 'normal', -- 'low', 'normal', 'high'
+    due_date TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+);
+
 -- apparently the refresh token gets it's own table, weird
 CREATE TABLE  refresh_tokens (
     id SERIAL PRIMARY KEY,
@@ -44,6 +55,7 @@ CREATE INDEX idx_user_notes ON notes(user_id, created_at DESC);
 CREATE INDEX idx_notes_created_at ON notes(created_at DESC);
 CREATE INDEX idx_notebook_notes ON notes(notebook_id);
 CREATE INDEX idx_user_notebooks ON notebooks(user_id, created_at DESC);
+CREATE INDEX idx_tasks_user_id ON tasks(user_id);
 
 -- default user maybe for me
 INSERT INTO users (username, password_hash) VALUES
