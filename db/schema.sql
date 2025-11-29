@@ -1,6 +1,9 @@
 -- for dev purposes
 DROP TABLE IF EXISTS notes;
 DROP TABLE IF EXISTS notebooks;
+DROP TABLE IF EXISTS task_checklist CASCADE;
+DROP TABLE IF EXISTS daily_tasks CASCADE;
+DROP TABLE IF EXISTS tasks CASCADE;
 DROP TABLE IF EXISTS refresh_tokens;
 DROP TABLE IF EXISTS users;
 
@@ -32,12 +35,32 @@ CREATE TABLE notes (
 CREATE TABLE IF NOT EXISTS tasks (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    content TEXT NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    description TEXT,
     is_completed BOOLEAN DEFAULT FALSE,
-    priority VARCHAR(10) DEFAULT 'normal', -- 'low', 'normal', 'high'
-    due_date TIMESTAMP
+    priority VARCHAR(10) DEFAULT 'normal',
+    due_date TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS task_checklist (
+    id SERIAL PRIMARY KEY,
+    task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+    title VARCHAR(100) NOT NULL,
+    is_completed BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS daily_tasks (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(200) NOT NULL,
+    is_completed BOOLEAN DEFAULT FALSE,
+    priority VARCHAR(10) DEFAULT 'normal',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- apparently the refresh token gets it's own table, weird
@@ -50,12 +73,15 @@ CREATE TABLE  refresh_tokens (
     revoked BOOLEAN DEFAULT FALSE
 );
 
--- apparently index for faster queries
+-- indexex for faster queries
 CREATE INDEX idx_user_notes ON notes(user_id, created_at DESC);
 CREATE INDEX idx_notes_created_at ON notes(created_at DESC);
 CREATE INDEX idx_notebook_notes ON notes(notebook_id);
 CREATE INDEX idx_user_notebooks ON notebooks(user_id, created_at DESC);
 CREATE INDEX idx_tasks_user_id ON tasks(user_id);
+CREATE INDEX idx_subtasks_task_id ON task_checklist(task_id);
+CREATE INDEX idx_daily_tasks_user_id ON daily_tasks(user_id);
+CREATE INDEX idx_daily_tasks_expires ON daily_tasks(expires_at);
 
 -- default user maybe for me
 INSERT INTO users (username, password_hash) VALUES
