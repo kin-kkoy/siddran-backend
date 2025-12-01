@@ -7,6 +7,7 @@ const authRouter = require ('./routes/auth')
 const notesRouter = require('./routes/notes')
 const notebooksRouter = require('./routes/notebook')
 const tasksRouter = require('./routes/tasks')
+const dailyTasksRouter = require('./routes/dailyTasks')
 const cookieParser = require('cookie-parser')
 
 const app = express();
@@ -26,6 +27,7 @@ app.use('/auth', authRouter);
 app.use('/notes', notesRouter);
 app.use('/notebooks', notebooksRouter)
 app.use('/tasks', tasksRouter)
+app.use('/daily-tasks', dailyTasksRouter)
 
 
 // extension of routes
