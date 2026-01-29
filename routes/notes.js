@@ -9,7 +9,7 @@ router.get('/', checkAuth, async (req, res) => {
 
     try{
         const result = await pool.query(
-            `SELECT id, title, body, created_at, updated_at, notebook_id
+            `SELECT id, title, body, created_at, updated_at, notebook_id, is_favorite, color, tags
              FROM notes
              WHERE user_id = $1
              ORDER BY created_at DESC`, [id]
@@ -30,7 +30,7 @@ router.get('/:id', checkAuth, async (req, res) => {
 
     try {
         const result = await pool.query(
-            `SELECT id, title, body, created_at, updated_at, notebook_id
+            `SELECT id, title, body, created_at, updated_at, notebook_id, is_favorite, color, tags
              FROM notes
              WHERE id = $1
              AND user_id = $2`, [noteID, userID]
@@ -70,7 +70,7 @@ router.post('/', checkAuth, async (req, res) => {
 
 // PUT /notes/:id
 router.put('/:id', checkAuth, async (req, res) => {
-    const {title, body} = req.body;
+    const {title, body, is_favorite, color, tags} = req.body;
     const {id: noteID} = req.params;
     const {id: userID} = req.user;
 
@@ -88,20 +88,35 @@ router.put('/:id', checkAuth, async (req, res) => {
         values.push(body);
     }
 
-    if(updates.length === 0) return res.status(400).json({ error: "Nothing to update (title/body)" })
+    if(is_favorite !== undefined){
+        updates.push(`is_favorite = $${parameterCount++}`);
+        values.push(is_favorite);
+    }
+
+    if(color !== undefined){
+        updates.push(`color = $${parameterCount++}`);
+        values.push(color);
+    }
+
+    if(tags !== undefined){
+        updates.push(`tags = $${parameterCount++}`);
+        values.push(tags);
+    }
+
+    if(updates.length === 0) return res.status(400).json({ error: "Nothing to update" })
 
     updates.push(`updated_at = CURRENT_TIMESTAMP`)
     values.push(noteID);
     values.push(userID);
 
     try {
-        
+
         const query = `
             UPDATE notes
             SET ${updates.join(', ')}
             WHERE id = $${parameterCount}
             AND user_id = $${parameterCount + 1}
-            RETURNING id, title, body, created_at, updated_at
+            RETURNING id, title, body, created_at, updated_at, is_favorite, color, tags
         `;
 
         const result = await pool.query(query, values)

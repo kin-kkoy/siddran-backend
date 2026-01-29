@@ -7,7 +7,7 @@ const checkAuth = require('../middleware/authMiddleware')
 router.get('/', checkAuth, async (req, res) => {
     try {
         const result = await pool.query(
-            `SELECT *
+            `SELECT id, name, created_at, updated_at, user_id, is_favorite, color, tags
              FROM notebooks
              WHERE user_id = $1
              ORDER BY created_at DESC`, [req.user.id]
@@ -42,12 +42,12 @@ router.get('/:id/notes', checkAuth, async (req, res) => {
 
 // post notebook
 router.post('/', checkAuth, async (req, res) => {
-    const {name, noteIds} = req.body;   // REMEMBER: noteIds is an ARRAY of note IDs to be added to the notebook
+    const {name, noteIds, tags} = req.body;   // REMEMBER: noteIds is an ARRAY of note IDs to be added to the notebook
 
     try {
         const ntbkResult = await pool.query(
-            `INSERT INTO notebooks (name, user_id) 
-            VALUES ($1, $2) RETURNING *`, [name || 'Untitled Notebook', req.user.id]
+            `INSERT INTO notebooks (name, user_id, tags)
+            VALUES ($1, $2, $3) RETURNING *`, [name || 'Untitled Notebook', req.user.id, tags || null]
         );
 
         const notebook = ntbkResult.rows[0]
@@ -75,7 +75,54 @@ router.post('/', checkAuth, async (req, res) => {
     }
 })
 
-// put more notes into the notebook (go back later)
+// put/update notebook (for favorite, color, and tags)
+router.put('/:id', checkAuth, async (req, res) => {
+    const { is_favorite, color, tags } = req.body;
+
+    try {
+        const updates = [];
+        const values = [req.params.id, req.user.id];
+        let parameterCount = 3;
+
+        if (is_favorite !== undefined) {
+            updates.push(`is_favorite = $${parameterCount++}`);
+            values.push(is_favorite);
+        }
+
+        if (color !== undefined) {
+            updates.push(`color = $${parameterCount++}`);
+            values.push(color);
+        }
+
+        if (tags !== undefined) {
+            updates.push(`tags = $${parameterCount++}`);
+            values.push(tags);
+        }
+
+        if (updates.length === 0) {
+            return res.status(400).json({ error: 'No valid fields to update' });
+        }
+
+        const query = `
+            UPDATE notebooks
+            SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1 AND user_id = $2
+            RETURNING *
+        `;
+
+        const result = await pool.query(query, values);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Notebook not found' });
+        }
+
+        res.json(result.rows[0]);
+
+    } catch (error) {
+        console.error('Failed to update notebook:', error);
+        res.status(500).json({ error: 'Something went wrong while updating notebook' });
+    }
+});
 
 // delete notes from notebook (by setting notebook_id to null in said note) BUT THE NOTE IS STILL ALIVE OK JUST REMOVED FROM THE GROUP (NOTEBOOK)
 router.delete('/:notebookId/notes/:noteId', checkAuth, async (req, res) => {
