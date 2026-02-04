@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router()
 const pool = require('../db/connection')
-const checkAuth = require('../middleware/authMiddleware')
+const checkAuth = require('../middleware/authMiddleware');
+const { strictLimiter, contentUpdateLimiter } = require('../middleware/rateLimiter');
 
 
 // Just found out that I could've just done it this way lol, but I still find the structure of notes.js to be more intuitive
@@ -48,7 +49,7 @@ router.get('/', async (req, res) => {
 });
 
 // POST a task
-router.post('/', async (req, res) => {
+router.post('/', strictLimiter, async (req, res) => {
     const { title, description, priority, due_date, checklist } = req.body;
 
     // Validation
@@ -64,7 +65,20 @@ router.post('/', async (req, res) => {
         return res.status(400).json({ error: 'Description must be 500 characters or less' });
     }
 
+    // For now cap the checklist, maybe remove in the future
+    if(checklist && checklist.length > 20) return res.status(400).json({ error: '20 checklist items per task only' })
+
     try {
+
+        // FOR NOW: Limit standard user's task count to 100 except for owner mwehhe. Like the other limiters, limit/max will be increased/removed if premium user
+        const taskCount = await pool.query(
+            `SELECT COUNT(*) FROM tasks
+            WHERE user_id = $1`, [req.user.id]
+        );
+
+        if(parseInt(taskCount.rows[0].count) >= 100) return res.status(400).json({error: "You have reached the maximum number of tasks"}); // "Upgrade to premium to add more or unlimited!"
+
+
         // Start transaction
         await pool.query('BEGIN');
 
@@ -113,7 +127,7 @@ router.post('/', async (req, res) => {
 })
 
 // PUT update a task
-router.put('/:id', async (req, res) => {
+router.put('/:id', contentUpdateLimiter, async (req, res) => {
     const { id } = req.params;
     const { title, description, is_completed, priority, due_date } = req.body;
 
@@ -162,7 +176,7 @@ router.put('/:id', async (req, res) => {
 })
 
 // DELETE a task (cascades to checklist items automatically)
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', strictLimiter, async (req, res) => {
     const { id } = req.params
 
     try {

@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const pool = require('../db/connection')
 const checkAuth = require('../middleware/authMiddleware')
+const { strictLimiter, contentUpdateLimiter } = require('../middleware/rateLimiter')
 
 router.use(checkAuth)
 
@@ -42,14 +43,28 @@ router.get('/', async (req, res) => {
 })
 
 // Create tasks (by batch)
-router.post('/', async (req, res) => {
+router.post('/', strictLimiter, async (req, res) => {
     const { tasks } = req.body // get the array of tasks
 
     if(!tasks || !Array.isArray(tasks) || tasks.length === 0){
         return res.status(400).json({ error: 'Array of tasks required!'})
     }
 
+    if(tasks.length > 20) return res.status(400).json({error: "Too many daily tasks per req (20 only)"})
+
     try {
+
+        // FOR NOW: Limit standard user's task count to 100 except for owner mwehhe. Like the other limiters, limit/max will be increased/removed if premium user
+        const dailyTaskCount = await pool.query(
+            `SELECT COUNT(*) FROM daily_tasks
+             WHERE user_id = $1
+             AND expires_at > NOW()`, [req.user.id]
+        );
+
+        const currentDTCount = parseInt(dailyTaskCount.rows[0].count);
+        if(currentDTCount + tasks.length > 50) return res.status(400).json({ error: `You can only have 50 active daily tasks at once. Currently have: ${currentDTCount}`})
+
+
         await pool.query('BEGIN'); // Start Batch Transaction
 
         const createdTasks = [];
@@ -77,7 +92,7 @@ router.post('/', async (req, res) => {
 })
 
 // Update tasks (completion of task)
-router.put('/:id', async (req, res) => {
+router.put('/:id', contentUpdateLimiter, async (req, res) => {
     const { id } = req.params;
     const { is_completed } = req.body;
     
@@ -102,7 +117,7 @@ router.put('/:id', async (req, res) => {
 })
 
 // Delete task
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', strictLimiter, async (req, res) => {
     const { id } = req.params
     
     try {

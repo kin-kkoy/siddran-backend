@@ -9,6 +9,8 @@ const notebooksRouter = require('./routes/notebook')
 const tasksRouter = require('./routes/tasks')
 const dailyTasksRouter = require('./routes/dailyTasks')
 const cookieParser = require('cookie-parser')
+const { generalLimiter, authLimiter } = require('./middleware/rateLimiter')
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,14 +18,16 @@ const PORT = process.env.PORT || 3000;
 
 // middlewares
 app.use(cors({
-  origin: 'http://localhost:5173',  // FRONTEND URL
+  origin: process.env.FRONTEND_URL,  // FRONTEND URL
   credentials: true  // Allow cookies to be sent!
 }));
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
 app.use(cookieParser()); // duh parses the cookie
 
+app.use(generalLimiter);
+
 // routes
-app.use('/auth', authRouter);
+app.use('/auth', authLimiter, authRouter);
 app.use('/notes', notesRouter);
 app.use('/notebooks', notebooksRouter)
 app.use('/tasks', tasksRouter)

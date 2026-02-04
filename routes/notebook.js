@@ -1,7 +1,8 @@
 const express = require('express')
 const router = express.Router()
 const pool = require('../db/connection')
-const checkAuth = require('../middleware/authMiddleware')
+const checkAuth = require('../middleware/authMiddleware');
+const { strictLimiter } = require('../middleware/rateLimiter');
 
 // get
 router.get('/', checkAuth, async (req, res) => {
@@ -41,10 +42,24 @@ router.get('/:id/notes', checkAuth, async (req, res) => {
 })
 
 // post notebook
-router.post('/', checkAuth, async (req, res) => {
+router.post('/', checkAuth, strictLimiter, async (req, res) => {
     const {name, noteIds, tags} = req.body;   // REMEMBER: noteIds is an ARRAY of note IDs to be added to the notebook
 
+    // FOR NOW: Add limit to # of notes in a notebook, but maybe remove this in the future since notebooks may contain as much notes as possible
+    if(noteIds && noteIds.length > 50) return res.status(400).json({ error: 'Max 50 notes per notebook only' })
+
     try {
+
+        // FOR NOW: Add limit to # of notebooks and in the future maybe set this to smth like premium users can have more notebooks (max for now: 20)
+        const ntbkCount = await pool.query(
+            `SELECT COUNT(*)
+            FROM notebooks
+            WHERE user_id = $1`, [req.user.id]
+        );
+
+        if(parseInt(ntbkCount.rows[0].count >= 20)) return res.status(400).json({error: "You have reached the maximum number of notebooks"})
+
+
         const ntbkResult = await pool.query(
             `INSERT INTO notebooks (name, user_id, tags)
             VALUES ($1, $2, $3) RETURNING *`, [name || 'Untitled Notebook', req.user.id, tags || null]
@@ -76,7 +91,7 @@ router.post('/', checkAuth, async (req, res) => {
 })
 
 // put/update notebook (for favorite, color, and tags)
-router.put('/:id', checkAuth, async (req, res) => {
+router.put('/:id', checkAuth, strictLimiter, async (req, res) => {
     const { is_favorite, color, tags } = req.body;
 
     try {
@@ -125,7 +140,7 @@ router.put('/:id', checkAuth, async (req, res) => {
 });
 
 // delete notes from notebook (by setting notebook_id to null in said note) BUT THE NOTE IS STILL ALIVE OK JUST REMOVED FROM THE GROUP (NOTEBOOK)
-router.delete('/:notebookId/notes/:noteId', checkAuth, async (req, res) => {
+router.delete('/:notebookId/notes/:noteId', checkAuth, strictLimiter, async (req, res) => {
     try {
         await pool.query(
             `UPDATE notes 
@@ -143,7 +158,7 @@ router.delete('/:notebookId/notes/:noteId', checkAuth, async (req, res) => {
 })
 
 // delete notebook (notes are still alive just not grouped anymroe)
-router.delete('/:id', checkAuth, async (req, res) => {
+router.delete('/:id', checkAuth, strictLimiter, async (req, res) => {
     try {
         // FIRST: UNLINK ALL NOTES before deleting
         await pool.query(

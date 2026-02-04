@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db/connection');
 const checkAuth = require('../middleware/authMiddleware')
+const { contentUpdateLimiter, strictLimiter } = require('../middleware/rateLimiter')
 
 // get all notes
 router.get('/', checkAuth, async (req, res) => {
@@ -47,13 +48,25 @@ router.get('/:id', checkAuth, async (req, res) => {
 });
 
 // POST /notes
-router.post('/', checkAuth, async (req, res) => {
+router.post('/', checkAuth, strictLimiter, async (req, res) => {
     const { title, body} = req.body;
     const { id: userID } = req.user;
     
     if(!title || title.trim() === '') return res.status(400).json({error: "Needs a title"})
 
+    // Body length / Notes contents length/size checker (IF PREMIUM IS GOING TO BE APPLIED, DOUBLE/TRIPLE THE SIZE)
+    if(body && body.length > 50000) return res.status(400).json({error: "Too many note contents (max 50,000 characters/letters)"})
+
     try {
+
+        // User's note count (max 50 notes only, aside from owner mwehehe)
+        const noteCount = await pool.query(
+            `SELECT COUNT(*)
+            FROM notes
+            WHERE user_id = $1`, [userID]
+        );
+
+        if(parseInt(noteCount.rows[0].count) >= 50) return res.status(400).json({ error: 'You have reached the maximum number of notes'}) // maybe add a message in the future to make users upgrade if they've reached max # of notes.
 
         const result = await pool.query(
             `INSERT INTO notes (title, body, user_id)
@@ -69,7 +82,7 @@ router.post('/', checkAuth, async (req, res) => {
 })
 
 // PUT /notes/:id
-router.put('/:id', checkAuth, async (req, res) => {
+router.put('/:id', checkAuth, contentUpdateLimiter, async (req, res) => {
     const {title, body, is_favorite, color, tags} = req.body;
     const {id: noteID} = req.params;
     const {id: userID} = req.user;
@@ -132,7 +145,7 @@ router.put('/:id', checkAuth, async (req, res) => {
 })
 
 // DELETE /notes/:id
-router.delete('/:id', checkAuth, async (req, res) => {
+router.delete('/:id', checkAuth, strictLimiter, async (req, res) => {
     const {id: noteID} = req.params;
     const {id: userID} = req.user;
 
