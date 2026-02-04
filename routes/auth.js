@@ -89,6 +89,17 @@ router.post('/register', async (req, res) => {
     const { username, password } = req.body;
     const salt = 10; // makes hash stronger
 
+    // Quick validation for username/password length ---------------
+    if(!username || !password) return res.status(400).json({error: "Username and password must not be empty"})
+
+    // Username validation
+    const usernameRegex = /^[a-zA-Z0-9_]{3,30}$/;   // characters that aren't allowed basically
+    if(!usernameRegex.test(username)) return res.status(400).json({ error: `Username must be 3-30 characters and can only contain letters, numbers, and underscores`});
+
+    // Password Validation
+    if(password.length < 6) return res.status(400).json({error: `Password must be at least 6 characters long`})
+
+
     try {
         const hashPass = await bcrypt.hash(password, salt);
 

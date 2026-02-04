@@ -15,6 +15,8 @@ const { generalLimiter, authLimiter } = require('./middleware/rateLimiter')
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Trust first proxy - apparently is REQUIRED for rate limiting to work on deployed platforms
+app.set('trust proxy', 1);
 
 // middlewares
 app.use(cors({
