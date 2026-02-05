@@ -11,22 +11,40 @@ router.use(checkAuth);
 
 // GET ALL tasks (with checklist items)
 router.get('/', async (req, res) => {
-    try {
-        // Get all tasks
-        const { rows: tasks } = await pool.query(
-            `SELECT * FROM tasks
-             WHERE user_id = $1
-             ORDER BY is_completed ASC, created_at DESC`,
-            [req.user.id]
-        );
+    const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+    const cursor = req.query.cursor;
 
-        // Get all checklist items for these tasks
-        const taskIds = tasks.map(t => t.id);
+    try {
+        let query, values;
+
+        if(cursor) {
+            // Get tasks older than cursor, but keep sort order (incomplete first, then by date)
+            query = `SELECT id, title, description, priority, due_date, is_completed, created_at, updated_at FROM tasks
+                WHERE user_id = $1 AND created_at < $2
+                ORDER BY is_completed ASC, created_at DESC
+                LIMIT $3`;
+            values = [req.user.id, cursor, limit + 1];
+        } else {
+            query = `SELECT id, title, description, priority, due_date, is_completed, created_at, updated_at FROM tasks
+                WHERE user_id = $1
+                ORDER BY is_completed ASC, created_at DESC
+                LIMIT $2`;
+            values = [req.user.id, limit + 1];
+        }
+
+        const { rows: tasks } = await pool.query(query, values);
+
+        const hasNextPage = tasks.length > limit;
+        const paginatedTasks = hasNextPage ? tasks.slice(0, -1) : tasks;
+
+
+        // Get checklist items for these specific tasks only (use paginatedTasks, not tasks)
+        const taskIds = paginatedTasks.map(t => t.id);
         
         let checklistItems = [];
         if (taskIds.length > 0) {
             const { rows } = await pool.query(
-                `SELECT * FROM task_checklist
+                `SELECT id, task_id, title, is_completed, created_at FROM task_checklist
                  WHERE task_id = ANY($1)
                  ORDER BY created_at ASC`,
                 [taskIds]
@@ -35,12 +53,16 @@ router.get('/', async (req, res) => {
         }
 
         // Attach checklist items to their parent tasks
-        const tasksWithChecklist = tasks.map(task => ({
+        const tasksWithChecklist = paginatedTasks.map(task => ({
             ...task,
             checklist: checklistItems.filter(item => item.task_id === task.id)
         }));
 
-        res.json(tasksWithChecklist);
+        const nextCursor = hasNextPage ? paginatedTasks[paginatedTasks.length - 1].created_at : null;
+
+        res.json({tasks: tasksWithChecklist, pagination: {
+            hasNextPage, nextCursor, limit
+        }});
 
     } catch (error) {
         console.error(error);
@@ -86,7 +108,7 @@ router.post('/', strictLimiter, async (req, res) => {
         const { rows: taskRows } = await pool.query(
             `INSERT INTO tasks (user_id, title, description, priority, due_date)
              VALUES ($1, $2, $3, $4, $5)
-             RETURNING *`,
+             RETURNING id, title, description, priority, due_date, is_completed, created_at, updated_at`,
             [req.user.id, title.trim(), description?.trim() || null, priority || 'normal', due_date || null]
         );
 
@@ -105,7 +127,7 @@ router.post('/', strictLimiter, async (req, res) => {
                 const { rows } = await pool.query(
                     `INSERT INTO task_checklist (task_id, title)
                      VALUES ($1, $2)
-                     RETURNING *`,
+                     RETURNING id, task_id, title, is_completed, created_at`,
                     [newTask.id, item.title.trim()]
                 );
                 createdChecklist.push(rows[0]);
@@ -122,7 +144,7 @@ router.post('/', strictLimiter, async (req, res) => {
     } catch (error) {
         await pool.query('ROLLBACK');
         console.error(error);
-        res.status(500).json({ error: error.message || 'Failed to create task' })
+        res.status(500).json({ error: 'Failed to create task' })
     }
 })
 
@@ -150,7 +172,7 @@ router.put('/:id', contentUpdateLimiter, async (req, res) => {
                  due_date = COALESCE($5, due_date),
                  updated_at = CURRENT_TIMESTAMP
              WHERE id = $6 AND user_id = $7
-             RETURNING *`,
+             RETURNING id, title, description, priority, due_date, is_completed, created_at, updated_at`,
             [title?.trim(), description?.trim(), is_completed, priority, due_date, id, req.user.id]
         );
 
@@ -160,7 +182,7 @@ router.put('/:id', contentUpdateLimiter, async (req, res) => {
 
         // Get checklist items
         const { rows: checklist } = await pool.query(
-            `SELECT * FROM task_checklist WHERE task_id = $1`,
+            `SELECT id, task_id, title, is_completed, created_at FROM task_checklist WHERE task_id = $1`,
             [id]
         );
 
@@ -200,7 +222,7 @@ router.delete('/:id', strictLimiter, async (req, res) => {
 // ----- CHECKLIST ROUTES -----
 
 // POST add a checklist item to an existing task
-router.post('/:taskId/checklist', async (req, res) => {
+router.post('/:taskId/checklist', strictLimiter, async (req, res) => {
     const { taskId } = req.params;
     const { title } = req.body;
 
@@ -226,7 +248,7 @@ router.post('/:taskId/checklist', async (req, res) => {
         const { rows } = await pool.query(
             `INSERT INTO task_checklist (task_id, title)
              VALUES ($1, $2)
-             RETURNING *`,
+             RETURNING id, task_id, title, is_completed, created_at`,
             [taskId, title.trim()]
         );
 
@@ -239,7 +261,7 @@ router.post('/:taskId/checklist', async (req, res) => {
 });
 
 // PUT update/toggle a checklist item
-router.put('/:taskId/checklist/:checklistId', async (req, res) => {
+router.put('/:taskId/checklist/:checklistId', contentUpdateLimiter, async (req, res) => {
     const { taskId, checklistId } = req.params;
     const { title, is_completed } = req.body;
 
@@ -263,7 +285,7 @@ router.put('/:taskId/checklist/:checklistId', async (req, res) => {
              SET title = COALESCE($1, title),
                  is_completed = COALESCE($2, is_completed)
              WHERE id = $3 AND task_id = $4
-             RETURNING *`,
+             RETURNING id, task_id, title, is_completed, created_at`,
             [title?.trim(), is_completed, checklistId, taskId]
         );
 
@@ -280,7 +302,7 @@ router.put('/:taskId/checklist/:checklistId', async (req, res) => {
 });
 
 // DELETE a checklist item
-router.delete('/:taskId/checklist/:checklistId', async (req, res) => {
+router.delete('/:taskId/checklist/:checklistId', strictLimiter, async (req, res) => {
     const { taskId, checklistId } = req.params;
 
     try {

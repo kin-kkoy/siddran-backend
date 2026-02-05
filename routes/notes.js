@@ -8,15 +8,51 @@ const { contentUpdateLimiter, strictLimiter } = require('../middleware/rateLimit
 router.get('/', checkAuth, async (req, res) => {
     const { id } = req.user;
 
-    try{
-        const result = await pool.query(
-            `SELECT id, title, body, created_at, updated_at, notebook_id, is_favorite, color, tags
-             FROM notes
-             WHERE user_id = $1
-             ORDER BY created_at DESC`, [id]
-        );
+    // pagination: basically give the data to user by chunks instead of everything to prevent data overload or self DOS. Used cursor for this instead of offset
+    const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+    const cursor = req.query.cursor; // ISO date string or null for the first page
 
-        res.status(200).json(result.rows);
+    try{
+        let query, values;
+
+        if(cursor){
+            // Get the notes older than the cursor if cursor exists
+            query = `SELECT id, title, body, created_at, updated_at, notebook_id, is_favorite, color, tags
+                FROM notes
+                WHERE user_id = $1 AND
+                created_at < $2
+                ORDER BY created_at DESC
+                LIMIT  $3`;
+            values = [id, cursor, limit+1]; // +1 to check if there's a next page
+        }else{
+            // no cursor existing yet (the first loading (GET) of data) so get the newest notes
+            query = ` SELECT id, title, body, created_at, updated_at, notebook_id, is_favorite, color, tags
+            FROM notes
+            WHERE user_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2`;
+            values = [id, limit+1];
+        }
+
+        // const result = await pool.query(
+        //     `SELECT id, title, body, created_at, updated_at, notebook_id, is_favorite, color, tags
+        //      FROM notes
+        //      WHERE user_id = $1
+        //      ORDER BY created_at DESC`, [id]
+        // );
+
+        const result = await pool.query(query, values);
+
+        // check if there's next page (the data after the ones we loaded)
+        const hasNextPage = result .rows.length > limit;
+
+        // removing the extra item fetched for checking
+        const notes = hasNextPage ? result.rows.slice(0, -1) : result.rows;
+
+        // this is the cursor for the next request which is the `created_at` of the last note 
+        const nextCursor = hasNextPage ? notes[notes.length - 1].created_at : null;
+
+        res.status(200).json({notes, pagination: { hasNextPage, nextCursor, limit }}); // `nextCursor is for frontend to use for next request`
 
     }catch(error){
         console.error('Error fetching notes:', error);
@@ -70,7 +106,7 @@ router.post('/', checkAuth, strictLimiter, async (req, res) => {
 
         const result = await pool.query(
             `INSERT INTO notes (title, body, user_id)
-             VALUES ($1, $2, $3) RETURNING *`, [title.trim(), body || '', userID]
+             VALUES ($1, $2, $3) RETURNING id, title, body, created_at, updated_at, notebook_id, is_favorite, color, tags`, [title.trim(), body || '', userID]
         );
 
         res.status(201).json(result.rows[0])

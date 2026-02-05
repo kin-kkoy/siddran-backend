@@ -5,6 +5,41 @@ const bcrypt = require('bcrypt')
 const jwt = require('jsonwebtoken')
 const crypto = require('crypto')
 
+// Per-account rate limiting for login attempts
+const loginAttempts = new Map() // { username: { count: number, lastAttempt: timestamp } }
+const MAX_LOGIN_ATTEMPTS = 5
+const LOCKOUT_DURATION = 15 * 60 * 1000 // 15 minutes
+
+const checkAccountLockout = (username) => {
+    const attempts = loginAttempts.get(username.toLowerCase())
+    if (!attempts) return { locked: false }
+
+    const timeSinceLastAttempt = Date.now() - attempts.lastAttempt
+
+    // Reset if lockout period has passed
+    if (timeSinceLastAttempt > LOCKOUT_DURATION) {
+        loginAttempts.delete(username.toLowerCase())
+        return { locked: false }
+    }
+
+    if (attempts.count >= MAX_LOGIN_ATTEMPTS) {
+        const remainingTime = Math.ceil((LOCKOUT_DURATION - timeSinceLastAttempt) / 60000)
+        return { locked: true, remainingMinutes: remainingTime }
+    }
+
+    return { locked: false }
+}
+
+const recordFailedAttempt = (username) => {
+    const key = username.toLowerCase()
+    const current = loginAttempts.get(key) || { count: 0 }
+    loginAttempts.set(key, { count: current.count + 1, lastAttempt: Date.now() })
+}
+
+const clearLoginAttempts = (username) => {
+    loginAttempts.delete(username.toLowerCase())
+}
+
 
 // Helper function: cleaup for the old tokens, used by the function after this
 const cleanExpiredTokens = async (userId) => {
@@ -98,6 +133,8 @@ router.post('/register', async (req, res) => {
 
     // Password Validation
     if(password.length < 6) return res.status(400).json({error: `Password must be at least 6 characters long`})
+    const hasSpecialOrNumber = /[0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password);
+    if(!hasSpecialOrNumber) return res.status(400).json({error: `Password must contain at least one number or special character`})
 
 
     try {
@@ -142,18 +179,39 @@ router.post('/register', async (req, res) => {
 router.post('/login', async (req, res) => {
     const { username, password } = req.body;
 
+    if (!username || !password) {
+        return res.status(400).json({ error: 'Username and password are required' })
+    }
+
+    // Check if account is locked due to too many failed attempts
+    const lockoutStatus = checkAccountLockout(username)
+    if (lockoutStatus.locked) {
+        return res.status(429).json({
+            error: `Too many failed login attempts. Please try again in ${lockoutStatus.remainingMinutes} minute(s).`
+        })
+    }
+
     try {
         const getUser = await pool.query(
-            `SELECT * 
+            `SELECT *
             FROM users
             WHERE username = $1`, [username]
         )
-        
-        if (getUser.rows.length === 0) return res.status(404).json({error: "Incorrect credentials"})
+
+        if (getUser.rows.length === 0) {
+            recordFailedAttempt(username)
+            return res.status(401).json({error: "Incorrect credentials"})
+        }
 
         const user = getUser.rows[0]
         const isUser = await bcrypt.compare(password, user.password_hash)
-        if(!isUser) return res.status(404).json({error: "Incorrect credentials"})
+        if(!isUser) {
+            recordFailedAttempt(username)
+            return res.status(401).json({error: "Incorrect credentials"})
+        }
+
+        // Clear failed attempts on successful login
+        clearLoginAttempts(username)
 
         // tokens part
         try {
@@ -206,6 +264,9 @@ router.post('/refresh', async (req, res) => {
         const tokenData = result.rows[0]
 
         if(tokenData.revoked) return res.status(401).json({error: 'Refresh token revoked'})
+
+        // expiry check right here, after the revoked check
+        if(new Date() > new Date(tokenData.expires_at)) return res.status(401).json({error: 'Refresh token expired'})
         
         const userResult = await pool.query(
             `SELECT id, username
@@ -217,14 +278,25 @@ router.post('/refresh', async (req, res) => {
 
         const user = userResult.rows[0]
 
-        // create new access token ("refresh" / "reset" the access token)
-        const accessToken = jwt.sign(
-            {id: user.id, username: user.username},
-            process.env.JWT_SECRET,
-            {expiresIn: '15m'}
+        // TOKEN ROTATION: Revoke the old refresh token and create new tokens
+        // This prevents token reuse attacks - if stolen token is used, legitimate user will notice
+        await pool.query(
+            `UPDATE refresh_tokens SET revoked = TRUE WHERE token = $1`,
+            [refreshToken]
         )
 
-        res.json({ accessToken })
+        // Generate new access AND refresh tokens
+        const tokens = await generateTokens(user.id, user.username)
+
+        // Set new refresh token in cookie
+        res.cookie('refreshToken', tokens.refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 7 * 24 * 60 * 60 * 1000 // 1 week
+        })
+
+        res.json({ accessToken: tokens.accessToken })
 
 
     } catch (error) {

@@ -9,8 +9,30 @@ const notebooksRouter = require('./routes/notebook')
 const tasksRouter = require('./routes/tasks')
 const dailyTasksRouter = require('./routes/dailyTasks')
 const cookieParser = require('cookie-parser')
+const helmet = require('helmet')
+const morgan = require('morgan')
 const { generalLimiter, authLimiter } = require('./middleware/rateLimiter')
+const pool = require('./db/connection')
 
+// Cleanup expired tokens on server startup
+const cleanupExpiredTokens = async () => {
+    try {
+        const expiredResult = await pool.query(
+            `DELETE FROM refresh_tokens WHERE expires_at < NOW()`
+        )
+        const revokedResult = await pool.query(
+            `DELETE FROM refresh_tokens
+             WHERE revoked = TRUE
+             AND created_at < NOW() - INTERVAL '30 days'`
+        )
+        console.log(`Token cleanup: Removed ${expiredResult.rowCount} expired and ${revokedResult.rowCount} old revoked tokens`)
+    } catch (error) {
+        console.error('Token cleanup failed:', error)
+    }
+}
+
+// Run cleanup on startup
+cleanupExpiredTokens()
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -19,12 +41,16 @@ const PORT = process.env.PORT || 3000;
 app.set('trust proxy', 1);
 
 // middlewares
+app.use(helmet())
 app.use(cors({
   origin: process.env.FRONTEND_URL,  // FRONTEND URL
   credentials: true  // Allow cookies to be sent!
 }));
 app.use(express.json({ limit: '100kb' }));
 app.use(cookieParser()); // duh parses the cookie
+
+// Request logging - 'dev' format in development, 'combined' in production for more detail
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'))
 
 app.use(generalLimiter);
 
@@ -55,4 +81,28 @@ app.use((err, req, res, next) => {
 });
 
 
-app.listen(PORT, () => console.log(`Backend listening on port ${PORT}`))
+// Graceful shutdown, jsut learned about this =====================================
+const server = app.listen(PORT, () => console.log(`Backend listening on port ${PORT}`))
+
+function SD(signal){ //shutdown
+  console.log(`Signal received, shutting down gracefully`)
+
+  server.close(async () => {
+    console.log('HTTP server closed');
+
+    // database pool close
+    await pool.end();
+    console.log(`DB pool closed`);
+
+    process.exit(0)
+  })
+
+  // force exit after 10 secs
+  setTimeout(() => {
+    console.error(`Forced shutdown after timeout`)
+    process.exit(1)
+  }, 10000)
+}
+
+process.on('SIGINT', SD)
+process.on('SIGTERM', SD)

@@ -24,17 +24,42 @@ const removeExpiredTasks = async (userId) => {
 router.get('/', async (req, res) => {
     const userId = req.user.id
 
+    //pagination (explanation in notes.js)
+    const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+    const cursor = req.query.cursor;
+
     try {
+        // Clean up expired tasks first
         await removeExpiredTasks(userId)
 
-        const { rows } = await pool.query(
-            `SELECT * FROM daily_tasks
-             WHERE user_id = $1
-             AND expires_at > NOW()
-             ORDER BY is_completed ASC, created_at DESC`, [userId]
-        );
+        let query, values;
 
-        res.json(rows)
+        if(cursor) {
+            query = `SELECT id, title, priority, is_completed, created_at, updated_at, expires_at FROM daily_tasks
+                WHERE user_id = $1
+                AND expires_at > NOW()
+                AND created_at < $2
+                ORDER BY is_completed ASC, created_at DESC
+                LIMIT $3`;
+            values = [userId, cursor, limit + 1];
+        } else {
+            query = `SELECT id, title, priority, is_completed, created_at, updated_at, expires_at FROM daily_tasks
+                WHERE user_id = $1
+                AND expires_at > NOW()
+                ORDER BY is_completed ASC, created_at DESC
+                LIMIT $2`;
+            values = [userId, limit + 1];
+        }
+
+        const { rows } = await pool.query(query, values);
+
+        const hasNextPage = rows.length > limit;
+        const dailyTasks = hasNextPage ? rows.slice(0, -1) : rows;
+        const nextCursor = hasNextPage ? dailyTasks[dailyTasks.length - 1].created_at : null;
+
+        res.json({ dailyTasks, pagination: {
+            hasNextPage, nextCursor, limit
+        }});
 
     } catch (error) {
         console.error(`Error fetching tasks:`,error);
@@ -77,7 +102,7 @@ router.post('/', strictLimiter, async (req, res) => {
             const {rows} = await pool.query(
                 `INSERT INTO daily_tasks (user_id, title, priority, expires_at)
                  VALUES ($1, $2, $3, $4)
-                 RETURNING *`, [req.user.id, task.title.trim(), task.priority || 'normal', expiresAt]);
+                 RETURNING id, title, priority, is_completed, created_at, updated_at, expires_at`, [req.user.id, task.title.trim(), task.priority || 'normal', expiresAt]);
             createdTasks.push(rows[0]);
         }
 
@@ -103,7 +128,7 @@ router.put('/:id', contentUpdateLimiter, async (req, res) => {
              WHERE id = $2
              AND user_id = $3
              AND expires_at > NOW()
-             RETURNING *`, [is_completed, id, req.user.id]
+             RETURNING id, title, priority, is_completed, created_at, updated_at, expires_at`, [is_completed, id, req.user.id]
         )
 
         if(rows.length === 0) return res.status(404).json({error: 'List of daily tasks not found or expired already'})
@@ -127,7 +152,7 @@ router.delete('/:id', strictLimiter, async (req, res) => {
              AND user_id = $2`, [id, req.user.id]
         );
 
-        if(rowCount === 0) res.status(404).json({ error: `Daily task not found`})
+        if(rowCount === 0) return res.status(404).json({ error: `Daily task not found`})
 
         res.status(200).json({message: `Successfully deleted daily task`})
 
