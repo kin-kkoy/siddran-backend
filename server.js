@@ -8,6 +8,7 @@ const notesRouter = require('./routes/notes')
 const notebooksRouter = require('./routes/notebook')
 const tasksRouter = require('./routes/tasks')
 const dailyTasksRouter = require('./routes/dailyTasks')
+const settingsRouter = require('./routes/settings')
 const cookieParser = require('cookie-parser')
 const helmet = require('helmet')
 const morgan = require('morgan')
@@ -50,7 +51,8 @@ app.use(express.json({ limit: '100kb' }));
 app.use(cookieParser()); // duh parses the cookie
 
 // Request logging - 'dev' format in development, 'combined' in production for more detail
-app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'))
+// Custom format includes timestamp for better debugging
+app.use(morgan(':date[iso] :method :url :status :response-time ms - :res[content-length]'))
 
 app.use(generalLimiter);
 
@@ -60,6 +62,7 @@ app.use('/notes', notesRouter);
 app.use('/notebooks', notebooksRouter)
 app.use('/tasks', tasksRouter)
 app.use('/daily-tasks', dailyTasksRouter)
+app.use('/settings', settingsRouter)
 
 
 // extension of routes
