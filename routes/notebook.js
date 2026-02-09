@@ -14,17 +14,19 @@ router.get('/', checkAuth, async (req, res) => {
         let query, values;
 
         if(cursor) {
-            query = `SELECT id, name, created_at, updated_at, is_favorite, color, tags
-                FROM notebooks
-                WHERE user_id = $1 AND created_at < $2
-                ORDER BY created_at DESC
+            query = `SELECT n.id, n.name, n.created_at, n.updated_at, n.is_favorite, n.color, n.tags,
+                  (SELECT COUNT(*) FROM notes WHERE notebook_id = n.id)::int AS note_count
+                FROM notebooks n
+                WHERE n.user_id = $1 AND n.created_at < $2
+                ORDER BY n.created_at DESC
                 LIMIT $3`;
             values = [req.user.id, cursor, limit + 1];
         } else {
-            query = `SELECT id, name, created_at, updated_at, is_favorite, color, tags
-                FROM notebooks
-                WHERE user_id = $1
-                ORDER BY created_at DESC
+            query = `SELECT n.id, n.name, n.created_at, n.updated_at, n.is_favorite, n.color, n.tags,
+                  (SELECT COUNT(*) FROM notes WHERE notebook_id = n.id)::int AS note_count
+                FROM notebooks n
+                WHERE n.user_id = $1
+                ORDER BY n.created_at DESC
                 LIMIT $2`;
             values = [req.user.id, limit + 1];
         }
@@ -143,9 +145,9 @@ router.post('/', checkAuth, strictLimiter, async (req, res) => {
     }
 })
 
-// put/update notebook (for favorite, color, and tags)
+// put/update notebook (for name, favorite, color, and tags)
 router.put('/:id', checkAuth, strictLimiter, async (req, res) => {
-    const { is_favorite, color, tags } = req.body;
+    const { name, is_favorite, color, tags } = req.body;
 
     // Validate tag length (max 20 characters per tag)
     if(tags && Array.isArray(tags)) {
@@ -157,6 +159,11 @@ router.put('/:id', checkAuth, strictLimiter, async (req, res) => {
         const updates = [];
         const values = [req.params.id, req.user.id];
         let parameterCount = 3;
+
+        if (name !== undefined) {
+            updates.push(`name = $${parameterCount++}`);
+            values.push(name.trim().slice(0, 100));
+        }
 
         if (is_favorite !== undefined) {
             updates.push(`is_favorite = $${parameterCount++}`);
@@ -195,6 +202,40 @@ router.put('/:id', checkAuth, strictLimiter, async (req, res) => {
     } catch (error) {
         logger.error('Failed to update notebook:', error);
         res.status(500).json({ error: 'Something went wrong while updating notebook' });
+    }
+});
+
+// add notes to an existing notebook
+router.post('/:id/notes', checkAuth, strictLimiter, async (req, res) => {
+    const { noteIds } = req.body;
+
+    if (!noteIds || !Array.isArray(noteIds) || noteIds.length === 0) {
+        return res.status(400).json({ error: 'noteIds array is required' });
+    }
+
+    try {
+        const notebookCheck = await pool.query(
+            'SELECT id FROM notebooks WHERE id = $1 AND user_id = $2',
+            [req.params.id, req.user.id]
+        );
+        if (notebookCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Notebook not found' });
+        }
+
+        const result = await pool.query(
+            `UPDATE notes
+             SET notebook_id = $1
+             WHERE id = ANY($2)
+             AND user_id = $3
+             AND notebook_id IS NULL
+             RETURNING *`,
+            [req.params.id, noteIds, req.user.id]
+        );
+
+        res.json({ updatedNotes: result.rows });
+    } catch (error) {
+        logger.error('Failed to add notes to notebook:', error);
+        res.status(500).json({ error: 'Failed to add notes to notebook' });
     }
 });
 
