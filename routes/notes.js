@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../db/connection');
 const checkAuth = require('../middleware/authMiddleware')
 const { contentUpdateLimiter, strictLimiter } = require('../middleware/rateLimiter')
+const logger = require('../utils/logger')
 
 // get all notes
 router.get('/', checkAuth, async (req, res) => {
@@ -55,7 +56,7 @@ router.get('/', checkAuth, async (req, res) => {
         res.status(200).json({notes, pagination: { hasNextPage, nextCursor, limit }}); // `nextCursor is for frontend to use for next request`
 
     }catch(error){
-        console.error('Error fetching notes:', error);
+        logger.error('Error fetching notes:', error);
         res.status(500).json({err: 'Something went wrong while fetching notes'})
     }
 });
@@ -78,7 +79,7 @@ router.get('/:id', checkAuth, async (req, res) => {
         res.status(200).json(result.rows[0]);
 
     } catch (error) {
-        console.error(`Failed to fetch this note:`, error);
+        logger.error(`Failed to fetch this note:`, error);
         res.status(500).json({error: `Something went wrong while fetching the note`})
     } 
 });
@@ -112,7 +113,7 @@ router.post('/', checkAuth, strictLimiter, async (req, res) => {
         res.status(201).json(result.rows[0])
         
     } catch (error) {
-        console.error(`Failed to add note:`, error);
+        logger.error(`Failed to add note:`, error);
         res.status(500).json({error: "Something went wrong while creating a note"})
     }
 })
@@ -175,7 +176,7 @@ router.put('/:id', checkAuth, contentUpdateLimiter, async (req, res) => {
         res.status(200).json(result.rows[0]);
 
     } catch (error) {
-        console.error(`Failed to edit note:`, error);
+        logger.error(`Failed to edit note:`, error);
         res.status(500).json({error: "Something went wrong while trying edit note"})
     }
 })
@@ -199,7 +200,7 @@ router.delete('/:id', checkAuth, strictLimiter, async (req, res) => {
         res.status(200).json({ message: "Note was deleted successfully:", id: result.rows[0].id });
 
     } catch (error) {
-        console.error(`Failed to delete note:`, error);
+        logger.error(`Failed to delete note:`, error);
         res.status(500).json({error: `Something went wrong while deleting the note`})
     }
 })

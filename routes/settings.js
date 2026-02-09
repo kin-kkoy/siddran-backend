@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const pool = require('../db/connection')
 const checkAuth = require('../middleware/authMiddleware')
+const logger = require('../utils/logger')
 
 router.use(checkAuth)
 
@@ -17,7 +18,7 @@ router.get('/', async (req, res) => {
         res.json({ settings: rows[0].settings || {} })
 
     } catch (error) {
-        console.error('Error fetching settings:', error)
+        logger.error('Error fetching settings:', error)
         res.status(500).json({ error: 'Something went wrong while fetching settings' })
     }
 })
@@ -41,7 +42,7 @@ router.put('/', async (req, res) => {
         res.json({ settings: rows[0].settings })
 
     } catch (error) {
-        console.error('Error updating settings:', error)
+        logger.error('Error updating settings:', error)
         res.status(500).json({ error: 'Something went wrong while updating settings' })
     }
 })

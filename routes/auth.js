@@ -4,6 +4,7 @@ const pool = require('../db/connection')
 const bcrypt = require('bcrypt')
 const jwt = require('jsonwebtoken')
 const crypto = require('crypto')
+const logger = require('../utils/logger')
 
 // Per-account rate limiting for login attempts
 const loginAttempts = new Map() // { username: { count: number, lastAttempt: timestamp } }
@@ -62,7 +63,7 @@ const cleanExpiredTokens = async (userId) => {
         )
 
     } catch (error) {
-        console.error(`Cleaning up tokens error:`, error)
+        logger.error(`Cleaning up tokens error:`, error)
     }
 }
 
@@ -164,12 +165,12 @@ router.post('/register', async (req, res) => {
             });
 
         } catch (tokenError) {
-            console.error('Error signing token:', tokenError);
+            logger.error('Error signing token:', tokenError);
             res.status(500).json({error: "Couldn't sign token"})
         }
 
     } catch (error) {
-        console.error(`Something went wrong while registering:`, error)
+        logger.error(`Something went wrong while registering:`, error)
         res.status(500).json({error: `Failed to register the user`})
     }
 })
@@ -235,12 +236,12 @@ router.post('/login', async (req, res) => {
             })
 
         } catch (tokenError) {
-            console.error('Error signing token:', tokenError);
+            logger.error('Error signing token:', tokenError);
             res.status(500).json({error: "Couldn't sign token"})
         }
-        
+
     } catch (error) {
-        console.error(`Something went wrong while logging in:`, error)
+        logger.error(`Something went wrong while logging in:`, error)
         res.status(500).json({error: "Couldn't login user"})
     }
 })
@@ -300,7 +301,7 @@ router.post('/refresh', async (req, res) => {
 
 
     } catch (error) {
-        console.error(`Refresh token error:`, error)
+        logger.error(`Refresh token error:`, error)
         res.status(500).json({error: 'Failed to refresh the token'})
     }
 })
@@ -319,7 +320,7 @@ router.post('/logout', async (req, res) => {
              WHERE token = $1`, [refreshToken]
         )
     } catch (error) {
-        console.error(`Logout error:`, error)
+        logger.error(`Logout error:`, error)
     }
 
     res.clearCookie(`refreshToken`)

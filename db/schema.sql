@@ -11,6 +11,7 @@ CREATE TABLE users (
     id SERIAL PRIMARY KEY,
     username VARCHAR(100) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
+    settings JSONB DEFAULT '{}',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -32,7 +33,10 @@ CREATE TABLE notes (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    notebook_id INTEGER REFERENCES notebooks(id) ON DELETE SET NULL -- since optional ra ang ntbks
+    notebook_id INTEGER REFERENCES notebooks(id) ON DELETE SET NULL,
+    is_favorite BOOLEAN DEFAULT FALSE,
+    color VARCHAR(50),
+    tags TEXT
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -66,8 +70,7 @@ CREATE TABLE IF NOT EXISTS daily_tasks (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- apparently the refresh token gets it's own table, weird
-CREATE TABLE  refresh_tokens (
+CREATE TABLE refresh_tokens (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     token TEXT NOT NULL UNIQUE,
@@ -76,7 +79,7 @@ CREATE TABLE  refresh_tokens (
     revoked BOOLEAN DEFAULT FALSE
 );
 
--- indexex for faster queries
+-- indexes for faster queries
 CREATE INDEX idx_user_notes ON notes(user_id, created_at DESC);
 CREATE INDEX idx_notes_created_at ON notes(created_at DESC);
 CREATE INDEX idx_notebook_notes ON notes(notebook_id);
@@ -85,12 +88,4 @@ CREATE INDEX idx_tasks_user_id ON tasks(user_id);
 CREATE INDEX idx_subtasks_task_id ON task_checklist(task_id);
 CREATE INDEX idx_daily_tasks_user_id ON daily_tasks(user_id);
 CREATE INDEX idx_daily_tasks_expires ON daily_tasks(expires_at);
-
--- default user maybe for me
-INSERT INTO users (username, password_hash) VALUES
-    ('iamtester', 'testing123');
-
-INSERT INTO notes (title, body, user_id) VALUES
-    ('Welcome Note', 'This is your first note! Start editing/creating new ones', 1),
-    ('Meeting Notes', 'Discuss project roadmap and milestones.', 1),
-    ('Ideas', 'Brainstorm features for future releases.', 1);
+CREATE INDEX idx_refresh_tokens_user_id ON refresh_tokens(user_id);

@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken')
+const logger = require('../utils/logger')
 
 const checkAuth = (req, res, next) => {
     try {
@@ -19,7 +20,7 @@ const checkAuth = (req, res, next) => {
         next();
 
     } catch (error) {
-        console.error('Failed to verify token:', error.message);
+        logger.error('Failed to verify token:', error.message);
         return res.status(401).json({error: "Invalid/expired token"})
     }
 }

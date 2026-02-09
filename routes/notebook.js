@@ -3,6 +3,7 @@ const router = express.Router()
 const pool = require('../db/connection')
 const checkAuth = require('../middleware/authMiddleware');
 const { strictLimiter } = require('../middleware/rateLimiter');
+const logger = require('../utils/logger')
 
 // get
 router.get('/', checkAuth, async (req, res) => {
@@ -41,7 +42,7 @@ router.get('/', checkAuth, async (req, res) => {
         }});
 
     } catch (error) {
-        console.error('Error fetching notebooks:', error)
+        logger.error('Error fetching notebooks:', error)
         res.status(500).json({error: 'Failed to fetch notebooks'})
     }
 });
@@ -82,7 +83,7 @@ router.get('/:id/notes', checkAuth, async (req, res) => {
         });
 
     } catch (error) {
-        console.error(`Failed to fetch notebook notes: `, error);
+        logger.error(`Failed to fetch notebook notes: `, error);
         res.status(500).json({error: 'Something went wrong while getting the notes of the notebook'})
     }
 })
@@ -137,7 +138,7 @@ router.post('/', checkAuth, strictLimiter, async (req, res) => {
         res.status(201).json({notebook, updatedNotes});
 
     } catch (error) {
-        console.error(`Failed to create notebook: `, error);
+        logger.error(`Failed to create notebook: `, error);
         res.status(500).json({error: 'Something went wrong while creating notebook'})
     }
 })
@@ -192,7 +193,7 @@ router.put('/:id', checkAuth, strictLimiter, async (req, res) => {
         res.json(result.rows[0]);
 
     } catch (error) {
-        console.error('Failed to update notebook:', error);
+        logger.error('Failed to update notebook:', error);
         res.status(500).json({ error: 'Something went wrong while updating notebook' });
     }
 });
@@ -210,7 +211,7 @@ router.delete('/:notebookId/notes/:noteId', checkAuth, strictLimiter, async (req
 
         res.json({message: 'Note has been removed from notebook'})
     } catch (error) {
-        console.error(`Failed to delete note: `, error);
+        logger.error(`Failed to delete note: `, error);
         res.status(500).json({error: 'Something went wrong while deleting that certain note'})
     }
 })
@@ -251,7 +252,7 @@ router.delete('/:id', checkAuth, strictLimiter, async (req, res) => {
 
     } catch (error) {
         await pool.query('ROLLBACK');
-        console.error(`Failed to delete notebook: `, error);
+        logger.error(`Failed to delete notebook: `, error);
         res.status(500).json({error: 'Something went wrong while deleting notebook'})
     }
 });

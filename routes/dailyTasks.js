@@ -3,6 +3,7 @@ const router = express.Router()
 const pool = require('../db/connection')
 const checkAuth = require('../middleware/authMiddleware')
 const { strictLimiter, contentUpdateLimiter } = require('../middleware/rateLimiter')
+const logger = require('../utils/logger')
 
 router.use(checkAuth)
 
@@ -16,7 +17,7 @@ const removeExpiredTasks = async (userId) => {
              AND expires_at < NOW()`, [userId]
         );
     } catch (error) {
-        console.error(`Removing expired tasks error:`, error)
+        logger.error(`Removing expired tasks error:`, error)
     }
 }
 
@@ -62,7 +63,7 @@ router.get('/', async (req, res) => {
         }});
 
     } catch (error) {
-        console.error(`Error fetching tasks:`,error);
+        logger.error(`Error fetching tasks:`,error);
         res.status(500).json({error: `Something went wrong while getting list of daily tasks`})
     }
 })
@@ -111,7 +112,7 @@ router.post('/', strictLimiter, async (req, res) => {
 
     } catch (error) {
         await pool.query('ROLLBACK')
-        console.error(`Error in adding daily tasks:`, error)
+        logger.error(`Error in adding daily tasks:`, error)
         res.status(500).json({error: `Something went wrong while adding list of daily tasks`})
     }
 })
@@ -136,7 +137,7 @@ router.put('/:id', contentUpdateLimiter, async (req, res) => {
         res.status(200).json(rows[0])
 
     } catch (error) {
-        console.error(`Error updating tasks:`,error);
+        logger.error(`Error updating tasks:`,error);
         res.status(500).json({error: `Something went wrong while updating list of daily tasks`})
     }
 })
@@ -157,7 +158,7 @@ router.delete('/:id', strictLimiter, async (req, res) => {
         res.status(200).json({message: `Successfully deleted daily task`})
 
     } catch (error) {
-        console.error(`Error deleting tasks:`,error);
+        logger.error(`Error deleting tasks:`,error);
         res.status(500).json({error: `Something went wrong while deleting the list of daily tasks`})
     }
 })

@@ -14,6 +14,7 @@ const helmet = require('helmet')
 const morgan = require('morgan')
 const { generalLimiter, authLimiter } = require('./middleware/rateLimiter')
 const pool = require('./db/connection')
+const logger = require('./utils/logger')
 
 // Cleanup expired tokens on server startup
 const cleanupExpiredTokens = async () => {
@@ -26,9 +27,9 @@ const cleanupExpiredTokens = async () => {
              WHERE revoked = TRUE
              AND created_at < NOW() - INTERVAL '30 days'`
         )
-        console.log(`Token cleanup: Removed ${expiredResult.rowCount} expired and ${revokedResult.rowCount} old revoked tokens`)
+        logger.info(`Token cleanup: Removed ${expiredResult.rowCount} expired and ${revokedResult.rowCount} old revoked tokens`)
     } catch (error) {
-        console.error('Token cleanup failed:', error)
+        logger.error('Token cleanup failed:', error)
     }
 }
 
@@ -42,7 +43,13 @@ const PORT = process.env.PORT || 3000;
 app.set('trust proxy', 1);
 
 // middlewares
-app.use(helmet())
+app.use(helmet({
+  contentSecurityPolicy: false,   // API-only server, no HTML served
+  hsts: {
+    maxAge: 31536000,             // 1 year
+    includeSubDomains: true,
+  },
+}))
 app.use(cors({
   origin: process.env.FRONTEND_URL,  // FRONTEND URL
   credentials: true  // Allow cookies to be sent!
@@ -79,30 +86,30 @@ app.use((req, res) => {
 
 // another safety net for the whole server. If an error happens and is not caught by the try-catches, this guy will catch it and show it in console, without it the whole server would crash.
 app.use((err, req, res, next) => {
-  console.error('Server error:', err);
+  logger.error('Server error:', err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
 
 // Graceful shutdown, jsut learned about this =====================================
-const server = app.listen(PORT, () => console.log(`Backend listening on port ${PORT}`))
+const server = app.listen(PORT, () => logger.info(`Backend listening on port ${PORT}`))
 
 function SD(signal){ //shutdown
-  console.log(`Signal received, shutting down gracefully`)
+  logger.info(`Signal received, shutting down gracefully`)
 
   server.close(async () => {
-    console.log('HTTP server closed');
+    logger.info('HTTP server closed');
 
     // database pool close
     await pool.end();
-    console.log(`DB pool closed`);
+    logger.info(`DB pool closed`);
 
     process.exit(0)
   })
 
   // force exit after 10 secs
   setTimeout(() => {
-    console.error(`Forced shutdown after timeout`)
+    logger.error(`Forced shutdown after timeout`)
     process.exit(1)
   }, 10000)
 }

@@ -1,5 +1,6 @@
 const { Pool } = require('pg');
 require('dotenv').config()
+const logger = require('../utils/logger')
 
 // connection pool
 const pool = new Pool({
@@ -7,19 +8,19 @@ const pool = new Pool({
 });
 
 pool.on('connect', () => {
-    console.log('Connected to postgresql db');
+    logger.info('Connected to postgresql db');
 })
 
 pool.on('error', err => {
-    console.error(`DB Connection error:  `, err);
+    logger.error(`DB Connection error:  `, err);
     process.exit(-1);
 })
 
 pool.query('SELECT NOW()', (err, res) => {
     if (err) {
-        console.error('Database connection error:', err)
+        logger.error('Database connection error:', err)
     } else {
-        console.log('Database connected successfully at:', res.rows[0].now)
+        logger.info('Database connected successfully at:', res.rows[0].now)
     }
 })
 

@@ -3,6 +3,7 @@ const router = express.Router()
 const pool = require('../db/connection')
 const checkAuth = require('../middleware/authMiddleware');
 const { strictLimiter, contentUpdateLimiter } = require('../middleware/rateLimiter');
+const logger = require('../utils/logger')
 
 
 // Just found out that I could've just done it this way lol, but I still find the structure of notes.js to be more intuitive
@@ -65,7 +66,7 @@ router.get('/', async (req, res) => {
         }});
 
     } catch (error) {
-        console.error(error);
+        logger.error(error);
         res.status(500).json({ error: 'Failed to fetch tasks' })
     }
 });
@@ -143,7 +144,7 @@ router.post('/', strictLimiter, async (req, res) => {
         
     } catch (error) {
         await pool.query('ROLLBACK');
-        console.error(error);
+        logger.error(error);
         res.status(500).json({ error: 'Failed to create task' })
     }
 })
@@ -192,7 +193,7 @@ router.put('/:id', contentUpdateLimiter, async (req, res) => {
         });
 
     } catch (error) {
-        console.error(error);
+        logger.error(error);
         res.status(500).json({ error: 'Failed to update task' })
     }
 })
@@ -214,7 +215,7 @@ router.delete('/:id', strictLimiter, async (req, res) => {
         res.json({ message: 'Task deleted successfully' })
 
     } catch (error) {
-        console.error(error);
+        logger.error(error);
         res.status(500).json({ error: 'Failed to delete task' })
     }
 })
@@ -255,7 +256,7 @@ router.post('/:taskId/checklist', strictLimiter, async (req, res) => {
         res.status(201).json(rows[0]);
 
     } catch (error) {
-        console.error(error);
+        logger.error(error);
         res.status(500).json({ error: 'Failed to create checklist item' });
     }
 });
@@ -296,7 +297,7 @@ router.put('/:taskId/checklist/:checklistId', contentUpdateLimiter, async (req, 
         res.json(rows[0]);
 
     } catch (error) {
-        console.error(error);
+        logger.error(error);
         res.status(500).json({ error: 'Failed to update checklist item' });
     }
 });
@@ -328,7 +329,7 @@ router.delete('/:taskId/checklist/:checklistId', strictLimiter, async (req, res)
         res.json({ message: 'Checklist item deleted successfully' });
 
     } catch (error) {
-        console.error(error);
+        logger.error(error);
         res.status(500).json({ error: 'Failed to delete checklist item' });
     }
 });
