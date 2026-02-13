@@ -61,6 +61,12 @@ app.use(cookieParser()); // duh parses the cookie
 // Custom format includes timestamp for better debugging
 app.use(morgan(':date[iso] :method :url :status :response-time ms - :res[content-length]'))
 
+// Health check endpoint (pings the server to checks if it's alive or not)
+// IMPORTANT: This must be BEFORE rate limiter so deployment platforms (e.g., Render) can ping it without getting rate-limited
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', message: 'Ember API is running' });
+});
+
 app.use(generalLimiter);
 
 // routes
@@ -70,14 +76,6 @@ app.use('/notebooks', notebooksRouter)
 app.use('/tasks', tasksRouter)
 app.use('/daily-tasks', dailyTasksRouter)
 app.use('/settings', settingsRouter)
-
-
-// extension of routes
-// Health check endpoint (pings the server to checks if it's alive or not)
-//  when app is deployed this'll be pinged occasionally to check if server is still running)
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', message: 'Ember API is running' });
-});
 
 // route not found hadnler (if route (page) doesn't exist)
 app.use((req, res) => {
