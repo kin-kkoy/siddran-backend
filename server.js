@@ -77,7 +77,7 @@ app.use('/tasks', tasksRouter)
 app.use('/daily-tasks', dailyTasksRouter)
 app.use('/settings', settingsRouter)
 
-// route not found hadnler (if route (page) doesn't exist)
+// route not found handler (if route (page) doesn't exist)
 app.use((req, res) => {
     res.status(404).json({ error: 'Route not found' })
 })
