@@ -12,7 +12,7 @@ const settingsRouter = require('./routes/settings')
 const cookieParser = require('cookie-parser')
 const helmet = require('helmet')
 const morgan = require('morgan')
-const { generalLimiter, authLimiter } = require('./middleware/rateLimiter')
+const { generalLimiter } = require('./middleware/rateLimiter')
 const pool = require('./db/connection')
 const logger = require('./utils/logger')
 
@@ -33,8 +33,10 @@ const cleanupExpiredTokens = async () => {
     }
 }
 
-// Run cleanup on startup
-cleanupExpiredTokens()
+// Run cleanup on startup (skip on Vercel where this would run on every cold start)
+if (!process.env.VERCEL) {
+    cleanupExpiredTokens()
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -70,7 +72,7 @@ app.get('/health', (req, res) => {
 app.use(generalLimiter);
 
 // routes
-app.use('/auth', authLimiter, authRouter);
+app.use('/auth', authRouter);
 app.use('/notes', notesRouter);
 app.use('/notebooks', notebooksRouter)
 app.use('/tasks', tasksRouter)
@@ -89,28 +91,34 @@ app.use((err, req, res, next) => {
 });
 
 
-// Graceful shutdown, jsut learned about this =====================================
-const server = app.listen(PORT, () => logger.info(`Backend listening on port ${PORT}`))
+// Only start the HTTP server when not on Vercel (Vercel sets VERCEL=1 automatically)
+if (!process.env.VERCEL) {
+    const server = app.listen(PORT, () => logger.info(`Backend listening on port ${PORT}`))
 
-function SD(signal){ //shutdown
-  logger.info(`Signal received, shutting down gracefully`)
+    // Graceful shutdown
+    function SD(signal) {
+        logger.info(`Signal received, shutting down gracefully`)
 
-  server.close(async () => {
-    logger.info('HTTP server closed');
+        server.close(async () => {
+            logger.info('HTTP server closed');
 
-    // database pool close
-    await pool.end();
-    logger.info(`DB pool closed`);
+            // database pool close
+            await pool.end();
+            logger.info(`DB pool closed`);
 
-    process.exit(0)
-  })
+            process.exit(0)
+        })
 
-  // force exit after 10 secs
-  setTimeout(() => {
-    logger.error(`Forced shutdown after timeout`)
-    process.exit(1)
-  }, 10000)
+        // force exit after 10 secs
+        setTimeout(() => {
+            logger.error(`Forced shutdown after timeout`)
+            process.exit(1)
+        }, 10000)
+    }
+
+    process.on('SIGINT', SD)
+    process.on('SIGTERM', SD)
 }
 
-process.on('SIGINT', SD)
-process.on('SIGTERM', SD)
+// Export for Vercel serverless handler
+module.exports = app;

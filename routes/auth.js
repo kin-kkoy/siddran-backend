@@ -5,6 +5,7 @@ const bcrypt = require('bcrypt')
 const jwt = require('jsonwebtoken')
 const crypto = require('crypto')
 const logger = require('../utils/logger')
+const { authLimiter } = require('../middleware/rateLimiter')
 
 // Per-account rate limiting for login attempts
 const loginAttempts = new Map() // { username: { count: number, lastAttempt: timestamp } }
@@ -121,7 +122,7 @@ const generateTokens = async (userId, username) => {
 
 
 // register
-router.post('/register', async (req, res) => {
+router.post('/register', authLimiter, async (req, res) => {
     const { username, password } = req.body;
     const salt = 10; // makes hash stronger
 
@@ -155,7 +156,7 @@ router.post('/register', async (req, res) => {
             res.cookie('refreshToken', tokens.refreshToken, {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === 'production',
-                sameSite: 'strict',
+                sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
                 maxAge: 7 * 24 * 60 * 60 * 1000
             })
 
@@ -177,7 +178,7 @@ router.post('/register', async (req, res) => {
 
 
 // login
-router.post('/login', async (req, res) => {
+router.post('/login', authLimiter, async (req, res) => {
     const { username, password } = req.body;
 
     if (!username || !password) {
@@ -225,7 +226,7 @@ router.post('/login', async (req, res) => {
             res.cookie(`refreshToken`, tokens.refreshToken, {
                 httpOnly: true, // simple means it can't be accessd by JS
                 secure: process.env.NODE_ENV === 'production', // S in HTTPS
-                sameSite: 'strict',
+                sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
                 maxAge: 7 * 24 * 60 * 60 * 1000// 1 week
             })
 
@@ -293,7 +294,7 @@ router.post('/refresh', async (req, res) => {
         res.cookie('refreshToken', tokens.refreshToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict',
+            sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
             maxAge: 7 * 24 * 60 * 60 * 1000 // 1 week
         })
 
