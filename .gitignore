@@ -1,2 +1,7 @@
 .env
 node_modules/
+
+# For teacher Obstinate
+AGENTS.md
+/.github/
+CLAUDE.md
