@@ -1,6 +1,12 @@
-const { Pool } = require('@neondatabase/serverless');
 require('dotenv').config()
 const logger = require('../utils/logger')
+
+let Pool;
+if (process.env.NODE_ENV === 'production') {
+    ({ Pool } = require('@neondatabase/serverless'));
+} else {
+    ({ Pool } = require('pg'));
+}
 
 // connection pool
 const pool = new Pool({
