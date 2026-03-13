@@ -117,31 +117,6 @@ router.post('/', strictLimiter, async (req, res) => {
     }
 })
 
-// Update tasks (completion of task)
-router.put('/:id', contentUpdateLimiter, async (req, res) => {
-    const { id } = req.params;
-    const { is_completed } = req.body;
-    
-    try {
-        const {rows} = await pool.query(
-            `UPDATE daily_tasks
-             SET is_completed = COALESCE($1, is_completed), updated_at = CURRENT_TIMESTAMP
-             WHERE id = $2
-             AND user_id = $3
-             AND expires_at > NOW()
-             RETURNING id, title, priority, is_completed, created_at, updated_at, expires_at`, [is_completed, id, req.user.id]
-        )
-
-        if(rows.length === 0) return res.status(404).json({error: 'List of daily tasks not found or expired already'})
-
-        res.status(200).json(rows[0])
-
-    } catch (error) {
-        logger.error(`Error updating tasks:`,error);
-        res.status(500).json({error: `Something went wrong while updating list of daily tasks`})
-    }
-})
-
 // Update tasks (batch completion of tasks)
 router.patch('/batch-complete', contentUpdateLimiter, async (req, res) => {
     const { tasks } = req.body;
@@ -182,27 +157,32 @@ router.patch('/batch-complete', contentUpdateLimiter, async (req, res) => {
     }
 })
 
-// Delete task
-router.delete('/:id', strictLimiter, async (req, res) => {
-    const { id } = req.params
+// Update tasks (completion of task)
+router.put('/:id', contentUpdateLimiter, async (req, res) => {
+    const { id } = req.params;
+    const { is_completed } = req.body;
     
     try {
-        const { rowCount } = await pool.query(
-            `DELETE FROM daily_tasks
-             WHERE id = $1
-             AND user_id = $2`, [id, req.user.id]
-        );
+        const {rows} = await pool.query(
+            `UPDATE daily_tasks
+             SET is_completed = COALESCE($1, is_completed), updated_at = CURRENT_TIMESTAMP
+             WHERE id = $2
+             AND user_id = $3
+             AND expires_at > NOW()
+             RETURNING id, title, priority, is_completed, created_at, updated_at, expires_at`, [is_completed, id, req.user.id]
+        )
 
-        if(rowCount === 0) return res.status(404).json({ error: `Daily task not found`})
+        if(rows.length === 0) return res.status(404).json({error: 'List of daily tasks not found or expired already'})
 
-        res.status(200).json({message: `Successfully deleted daily task`})
+        res.status(200).json(rows[0])
 
     } catch (error) {
-        logger.error(`Error deleting tasks:`,error);
-        res.status(500).json({error: `Something went wrong while deleting the list of daily tasks`})
+        logger.error(`Error updating tasks:`,error);
+        res.status(500).json({error: `Something went wrong while updating list of daily tasks`})
     }
 })
 
+// Delete tasks in batch
 router.delete('/batch-delete', strictLimiter, async (req, res) => {
     const { tasks } = req.body;
 
@@ -236,6 +216,27 @@ router.delete('/batch-delete', strictLimiter, async (req, res) => {
         await pool.query('ROLLBACK')
         logger.error(`Error deleting tasks:`,error);
         res.status(500).json({error: `Something went wrong while deleting list of daily tasks`})
+    }
+})
+
+// Delete task
+router.delete('/:id', strictLimiter, async (req, res) => {
+    const { id } = req.params
+    
+    try {
+        const { rowCount } = await pool.query(
+            `DELETE FROM daily_tasks
+             WHERE id = $1
+             AND user_id = $2`, [id, req.user.id]
+        );
+
+        if(rowCount === 0) return res.status(404).json({ error: `Daily task not found`})
+
+        res.status(200).json({message: `Successfully deleted daily task`})
+
+    } catch (error) {
+        logger.error(`Error deleting tasks:`,error);
+        res.status(500).json({error: `Something went wrong while deleting the list of daily tasks`})
     }
 })
 
