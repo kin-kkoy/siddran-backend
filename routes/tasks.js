@@ -45,7 +45,7 @@ router.get('/', async (req, res) => {
         let checklistItems = [];
         if (taskIds.length > 0) {
             const { rows } = await pool.query(
-                `SELECT id, task_id, title, is_completed, created_at FROM task_checklist
+                `SELECT id, task_id, title, priority, is_completed, created_at, updated_at FROM task_checklist
                  WHERE task_id = ANY($1)
                  ORDER BY created_at ASC`,
                 [taskIds]
@@ -126,10 +126,10 @@ router.post('/', strictLimiter, async (req, res) => {
                 }
 
                 const { rows } = await pool.query(
-                    `INSERT INTO task_checklist (task_id, title)
-                     VALUES ($1, $2)
-                     RETURNING id, task_id, title, is_completed, created_at`,
-                    [newTask.id, item.title.trim()]
+                    `INSERT INTO task_checklist (task_id, title, priority)
+                     VALUES ($1, $2, $3)
+                     RETURNING id, task_id, title, priority, is_completed, created_at, updated_at`,
+                    [newTask.id, item.title.trim(), item.priority]
                 );
                 createdChecklist.push(rows[0]);
             }
@@ -183,7 +183,7 @@ router.put('/:id', contentUpdateLimiter, async (req, res) => {
 
         // Get checklist items
         const { rows: checklist } = await pool.query(
-            `SELECT id, task_id, title, is_completed, created_at FROM task_checklist WHERE task_id = $1`,
+            `SELECT id, task_id, title, priority, is_completed, created_at, updated_at FROM task_checklist WHERE task_id = $1`,
             [id]
         );
 
@@ -225,7 +225,7 @@ router.delete('/:id', strictLimiter, async (req, res) => {
 // POST add a checklist item to an existing task
 router.post('/:taskId/checklist', strictLimiter, async (req, res) => {
     const { taskId } = req.params;
-    const { title } = req.body;
+    const { title, priority } = req.body;
 
     if (!title || title.trim().length === 0) {
         return res.status(400).json({ error: 'Checklist item title is required' });
@@ -247,10 +247,10 @@ router.post('/:taskId/checklist', strictLimiter, async (req, res) => {
         }
 
         const { rows } = await pool.query(
-            `INSERT INTO task_checklist (task_id, title)
-             VALUES ($1, $2)
-             RETURNING id, task_id, title, is_completed, created_at`,
-            [taskId, title.trim()]
+            `INSERT INTO task_checklist (task_id, title, priority)
+             VALUES ($1, $2, $3)
+             RETURNING id, task_id, title, priority, is_completed, created_at, updated_at`,
+            [taskId, title.trim(), priority]
         );
 
         res.status(201).json(rows[0]);
@@ -264,7 +264,7 @@ router.post('/:taskId/checklist', strictLimiter, async (req, res) => {
 // PUT update/toggle a checklist item
 router.put('/:taskId/checklist/:checklistId', contentUpdateLimiter, async (req, res) => {
     const { taskId, checklistId } = req.params;
-    const { title, is_completed } = req.body;
+    const { title, is_completed, priority } = req.body;
 
     if (title && title.length > 100) {
         return res.status(400).json({ error: 'Checklist item title must be 100 characters or less' });
@@ -284,10 +284,12 @@ router.put('/:taskId/checklist/:checklistId', contentUpdateLimiter, async (req, 
         const { rows } = await pool.query(
             `UPDATE task_checklist
              SET title = COALESCE($1, title),
-                 is_completed = COALESCE($2, is_completed)
-             WHERE id = $3 AND task_id = $4
-             RETURNING id, task_id, title, is_completed, created_at`,
-            [title?.trim(), is_completed, checklistId, taskId]
+                 priority = COALESCE ($2, priority),
+                 is_completed = COALESCE($3, is_completed),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $4 AND task_id = $5
+             RETURNING id, task_id, title, priority, is_completed, created_at, updated_at`,
+            [title?.trim(), priority, is_completed, checklistId, taskId]
         );
 
         if (rows.length === 0) {

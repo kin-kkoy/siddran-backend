@@ -490,8 +490,10 @@ List all tasks with their checklist items (cursor-paginated). Sorted: incomplete
           "id": 1,
           "task_id": 1,
           "title": "string",
+          "priority": "normal",
           "is_completed": false,
-          "created_at": "ISO"
+          "created_at": "ISO",
+          "updated_at": "ISO"
         }
       ]
     }
@@ -517,7 +519,7 @@ Create a task with optional checklist items. Rate limit: `strictLimiter`. Max 10
 | `description` | string   | no       | Max 500 chars               |
 | `priority`    | string   | no       | Default: `"normal"`         |
 | `due_date`    | string   | no       | ISO date string             |
-| `checklist`   | array    | no       | Max 20 items, each `{ title }` (max 100 chars) |
+| `checklist`   | array    | no       | Max 20 items, each `{ title, priority? }` (title max 100 chars) |
 
 **Response** `201`
 ```json
@@ -584,9 +586,10 @@ Delete a task (checklist items cascade-deleted). Rate limit: `strictLimiter`
 Add a checklist item to an existing task. Rate limit: `strictLimiter`
 
 **Request Body**
-| Field   | Type   | Required | Rules            |
-|---------|--------|----------|------------------|
-| `title` | string | yes      | Non-empty, max 100 chars |
+| Field      | Type   | Required | Rules                    |
+|------------|--------|----------|--------------------------|
+| `title`    | string | yes      | Non-empty, max 100 chars |
+| `priority` | string | no       | Default: `"normal"`      |
 
 **Response** `201`
 ```json
@@ -594,8 +597,10 @@ Add a checklist item to an existing task. Rate limit: `strictLimiter`
   "id": 1,
   "task_id": 1,
   "title": "string",
+  "priority": "normal",
   "is_completed": false,
-  "created_at": "ISO"
+  "created_at": "ISO",
+  "updated_at": "ISO"
 }
 ```
 
@@ -615,6 +620,7 @@ Update/toggle a checklist item. Rate limit: `contentUpdateLimiter`
 | Field          | Type    | Rules          |
 |----------------|---------|----------------|
 | `title`        | string  | Max 100 chars  |
+| `priority`     | string  |                |
 | `is_completed` | boolean |                |
 
 **Response** `200`
@@ -623,8 +629,10 @@ Update/toggle a checklist item. Rate limit: `contentUpdateLimiter`
   "id": 1,
   "task_id": 1,
   "title": "string",
+  "priority": "normal",
   "is_completed": true,
-  "created_at": "ISO"
+  "created_at": "ISO",
+  "updated_at": "ISO"
 }
 ```
 
