@@ -779,6 +779,60 @@ Delete a daily task. Rate limit: `strictLimiter`
 
 ---
 
+### `PATCH /daily-tasks/batch-complete`
+
+Batch update completion status of multiple daily tasks. Rate limit: `contentUpdateLimiter`
+
+**Request Body**
+| Field   | Type  | Required | Rules                                              |
+|---------|-------|----------|----------------------------------------------------|
+| `tasks` | array | yes      | Array of `{ id, is_completed }`. Non-empty.        |
+
+**Response** `200`
+```json
+[
+  {
+    "id": 1,
+    "title": "string",
+    "priority": "normal",
+    "is_completed": true,
+    "created_at": "ISO",
+    "updated_at": "ISO",
+    "expires_at": "ISO"
+  }
+]
+```
+
+**Errors**
+| Status | Condition                          |
+|--------|------------------------------------|
+| 400    | Missing or empty tasks array       |
+| 404    | A task was not found or expired    |
+
+---
+
+### `DELETE /daily-tasks/batch-delete`
+
+Batch delete multiple daily tasks. Rate limit: `strictLimiter`
+
+**Request Body**
+| Field   | Type  | Required | Rules                        |
+|---------|-------|----------|------------------------------|
+| `tasks` | array | yes      | Array of `{ id }`. Non-empty.|
+
+**Response** `200`
+```json
+{ "message": "Successfully deleted list of daily tasks" }
+```
+
+**Errors**
+| Status | Condition                    |
+|--------|------------------------------|
+| 400    | Missing or empty tasks array |
+| 404    | A task was not found         |
+
+---
+
 ## Settings (`/settings`)
 
 All endpoints require auth. Rate limit: `generalLimiter`

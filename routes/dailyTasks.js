@@ -142,6 +142,46 @@ router.put('/:id', contentUpdateLimiter, async (req, res) => {
     }
 })
 
+// Update tasks (batch completion of tasks)
+router.patch('/batch-complete', contentUpdateLimiter, async (req, res) => {
+    const { tasks } = req.body;
+
+    if(!tasks || !Array.isArray(tasks) || tasks.length === 0){
+        return res.status(400).json({ error: 'Array of tasks required!'})
+    }
+
+    try {
+
+        await pool.query('BEGIN'); // Start Batch Transaction
+
+        const updatedTasks = [];
+
+        for(const task of tasks){
+            if(!task.id) continue;
+
+            const {rows} = await pool.query(
+                `UPDATE daily_tasks
+                 SET is_completed = COALESCE($1, is_completed), updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $2
+                 AND user_id = $3
+                 AND expires_at > NOW()
+                 RETURNING id, title, priority, is_completed, created_at, updated_at, expires_at`,
+                 [task.is_completed, task.id, req.user.id]
+            )
+
+            updatedTasks.push(rows[0]);
+        }
+
+        await pool.query(`COMMIT`); // End ---
+        res.status(200).json(updatedTasks);
+
+    } catch (error) {
+        await pool.query('ROLLBACK')
+        logger.error(`Error updating tasks:`,error);
+        res.status(500).json({error: `Something went wrong while updating list of daily tasks`})
+    }
+})
+
 // Delete task
 router.delete('/:id', strictLimiter, async (req, res) => {
     const { id } = req.params
@@ -160,6 +200,42 @@ router.delete('/:id', strictLimiter, async (req, res) => {
     } catch (error) {
         logger.error(`Error deleting tasks:`,error);
         res.status(500).json({error: `Something went wrong while deleting the list of daily tasks`})
+    }
+})
+
+router.delete('/batch-delete', strictLimiter, async (req, res) => {
+    const { tasks } = req.body;
+
+    if(!tasks || !Array.isArray(tasks) || tasks.length === 0){
+        return res.status(400).json({ error: 'Array of tasks required!'})
+    }
+
+    try {
+
+        await pool.query('BEGIN')
+
+        for(const task of tasks){
+            if(!task.id) continue;
+
+            const { rowCount } = await pool.query(
+                `DELETE FROM daily_tasks
+                WHERE id = $1
+                AND user_id = $2`, [task.id, req.user.id]
+            );
+
+            if(rowCount === 0){
+                await pool.query('ROLLBACK')
+                return res.status(404).json({ error: `Daily task not found`})
+            }
+        }
+
+        await pool.query(`COMMIT`); // End ---
+        res.status(200).json({message: `Successfully deleted list of daily tasks`});
+        
+    } catch (error) {
+        await pool.query('ROLLBACK')
+        logger.error(`Error deleting tasks:`,error);
+        res.status(500).json({error: `Something went wrong while deleting list of daily tasks`})
     }
 })
 
