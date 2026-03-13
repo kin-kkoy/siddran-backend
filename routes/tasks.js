@@ -10,7 +10,7 @@ const logger = require('../utils/logger')
 router.use(checkAuth);
 
 
-// GET ALL tasks (with checklist items)
+// GET ALL tasks
 router.get('/', async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 20, 50);
     const cursor = req.query.cursor;
@@ -37,33 +37,14 @@ router.get('/', async (req, res) => {
 
         const hasNextPage = tasks.length > limit;
         const paginatedTasks = hasNextPage ? tasks.slice(0, -1) : tasks;
-
-
-        // Get checklist items for these specific tasks only (use paginatedTasks, not tasks)
-        const taskIds = paginatedTasks.map(t => t.id);
-        
-        let checklistItems = [];
-        if (taskIds.length > 0) {
-            const { rows } = await pool.query(
-                `SELECT id, task_id, title, priority, is_completed, created_at, updated_at FROM task_checklist
-                 WHERE task_id = ANY($1)
-                 ORDER BY created_at ASC`,
-                [taskIds]
-            );
-            checklistItems = rows;
-        }
-
-        // Attach checklist items to their parent tasks
-        const tasksWithChecklist = paginatedTasks.map(task => ({
-            ...task,
-            checklist: checklistItems.filter(item => item.task_id === task.id)
-        }));
-
         const nextCursor = hasNextPage ? paginatedTasks[paginatedTasks.length - 1].created_at : null;
 
-        res.json({tasks: tasksWithChecklist, pagination: {
-            hasNextPage, nextCursor, limit
-        }});
+        res.json({ tasks: paginatedTasks, pagination: {
+                hasNextPage, 
+                nextCursor,
+                limit 
+            } 
+        })
 
     } catch (error) {
         logger.error(error);
@@ -73,7 +54,7 @@ router.get('/', async (req, res) => {
 
 // POST a task
 router.post('/', strictLimiter, async (req, res) => {
-    const { title, description, priority, due_date, checklist } = req.body;
+    const { title, description, priority, due_date } = req.body;
 
     // Validation
     if (!title || title.trim().length === 0) {
@@ -88,9 +69,6 @@ router.post('/', strictLimiter, async (req, res) => {
         return res.status(400).json({ error: 'Description must be 500 characters or less' });
     }
 
-    // For now cap the checklist, maybe remove in the future
-    if(checklist && checklist.length > 20) return res.status(400).json({ error: '20 checklist items per task only' })
-
     try {
 
         // FOR NOW: Limit standard user's task count to 100 except for owner mwehhe. Like the other limiters, limit/max will be increased/removed if premium user
@@ -102,9 +80,6 @@ router.post('/', strictLimiter, async (req, res) => {
         if(parseInt(taskCount.rows[0].count) >= 100) return res.status(400).json({error: "You have reached the maximum number of tasks"}); // "Upgrade to premium to add more or unlimited!"
 
 
-        // Start transaction
-        await pool.query('BEGIN');
-
         // Insert main task
         const { rows: taskRows } = await pool.query(
             `INSERT INTO tasks (user_id, title, description, priority, due_date)
@@ -115,35 +90,9 @@ router.post('/', strictLimiter, async (req, res) => {
 
         const newTask = taskRows[0];
 
-        // Insert checklist items if provided
-        const createdChecklist = [];
-        if (checklist && Array.isArray(checklist) && checklist.length > 0) {
-            for (const item of checklist) {
-                if (!item.title || item.title.trim().length === 0) continue;
-
-                if (item.title.length > 100) {
-                    throw new Error('Checklist item title must be 100 characters or less');
-                }
-
-                const { rows } = await pool.query(
-                    `INSERT INTO task_checklist (task_id, title, priority)
-                     VALUES ($1, $2, $3)
-                     RETURNING id, task_id, title, priority, is_completed, created_at, updated_at`,
-                    [newTask.id, item.title.trim(), item.priority]
-                );
-                createdChecklist.push(rows[0]);
-            }
-        }
-
-        await pool.query('COMMIT');
-
-        res.status(201).json({
-            ...newTask,
-            checklist: createdChecklist
-        });
+        res.status(201).json({ ...newTask });
         
     } catch (error) {
-        await pool.query('ROLLBACK');
         logger.error(error);
         res.status(500).json({ error: 'Failed to create task' })
     }
@@ -181,16 +130,7 @@ router.put('/:id', contentUpdateLimiter, async (req, res) => {
             return res.status(404).json({ error: 'Task not found' });
         }
 
-        // Get checklist items
-        const { rows: checklist } = await pool.query(
-            `SELECT id, task_id, title, priority, is_completed, created_at, updated_at FROM task_checklist WHERE task_id = $1`,
-            [id]
-        );
-
-        res.json({
-            ...rows[0],
-            checklist
-        });
+        res.json({ ...rows[0] });
 
     } catch (error) {
         logger.error(error);
@@ -219,121 +159,5 @@ router.delete('/:id', strictLimiter, async (req, res) => {
         res.status(500).json({ error: 'Failed to delete task' })
     }
 })
-
-// ----- CHECKLIST ROUTES -----
-
-// POST add a checklist item to an existing task
-router.post('/:taskId/checklist', strictLimiter, async (req, res) => {
-    const { taskId } = req.params;
-    const { title, priority } = req.body;
-
-    if (!title || title.trim().length === 0) {
-        return res.status(400).json({ error: 'Checklist item title is required' });
-    }
-
-    if (title.length > 100) {
-        return res.status(400).json({ error: 'Checklist item title must be 100 characters or less' });
-    }
-
-    try {
-        // Verify task exists and belongs to user
-        const { rows: taskRows } = await pool.query(
-            `SELECT id FROM tasks WHERE id = $1 AND user_id = $2`,
-            [taskId, req.user.id]
-        );
-
-        if (taskRows.length === 0) {
-            return res.status(404).json({ error: 'Task not found' });
-        }
-
-        const { rows } = await pool.query(
-            `INSERT INTO task_checklist (task_id, title, priority)
-             VALUES ($1, $2, $3)
-             RETURNING id, task_id, title, priority, is_completed, created_at, updated_at`,
-            [taskId, title.trim(), priority]
-        );
-
-        res.status(201).json(rows[0]);
-
-    } catch (error) {
-        logger.error(error);
-        res.status(500).json({ error: 'Failed to create checklist item' });
-    }
-});
-
-// PUT update/toggle a checklist item
-router.put('/:taskId/checklist/:checklistId', contentUpdateLimiter, async (req, res) => {
-    const { taskId, checklistId } = req.params;
-    const { title, is_completed, priority } = req.body;
-
-    if (title && title.length > 100) {
-        return res.status(400).json({ error: 'Checklist item title must be 100 characters or less' });
-    }
-
-    try {
-        // Verify task belongs to user
-        const { rows: taskRows } = await pool.query(
-            `SELECT id FROM tasks WHERE id = $1 AND user_id = $2`,
-            [taskId, req.user.id]
-        );
-
-        if (taskRows.length === 0) {
-            return res.status(404).json({ error: 'Task not found' });
-        }
-
-        const { rows } = await pool.query(
-            `UPDATE task_checklist
-             SET title = COALESCE($1, title),
-                 priority = COALESCE ($2, priority),
-                 is_completed = COALESCE($3, is_completed),
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = $4 AND task_id = $5
-             RETURNING id, task_id, title, priority, is_completed, created_at, updated_at`,
-            [title?.trim(), priority, is_completed, checklistId, taskId]
-        );
-
-        if (rows.length === 0) {
-            return res.status(404).json({ error: 'Checklist item not found' });
-        }
-
-        res.json(rows[0]);
-
-    } catch (error) {
-        logger.error(error);
-        res.status(500).json({ error: 'Failed to update checklist item' });
-    }
-});
-
-// DELETE a checklist item
-router.delete('/:taskId/checklist/:checklistId', strictLimiter, async (req, res) => {
-    const { taskId, checklistId } = req.params;
-
-    try {
-        // Verify task belongs to user
-        const { rows: taskRows } = await pool.query(
-            `SELECT id FROM tasks WHERE id = $1 AND user_id = $2`,
-            [taskId, req.user.id]
-        );
-
-        if (taskRows.length === 0) {
-            return res.status(404).json({ error: 'Task not found' });
-        }
-
-        const { rowCount } = await pool.query(
-            `DELETE FROM task_checklist WHERE id = $1 AND task_id = $2`,
-            [checklistId, taskId]
-        );
-
-        if (rowCount === 0) {
-            return res.status(404).json({ error: 'Checklist item not found' });
-        }
-
-        res.json({ message: 'Checklist item deleted successfully' });
-
-    } catch (error) {
-        logger.error(error);
-        res.status(500).json({ error: 'Failed to delete checklist item' });
-    }
-});
 
 module.exports = router;

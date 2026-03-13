@@ -1,7 +1,7 @@
 -- for dev purposes
 DROP TABLE IF EXISTS notes;
 DROP TABLE IF EXISTS notebooks;
-DROP TABLE IF EXISTS task_checklist CASCADE;
+DROP TABLE IF EXISTS project_tasks CASCADE;
 DROP TABLE IF EXISTS daily_tasks CASCADE;
 DROP TABLE IF EXISTS tasks CASCADE;
 DROP TABLE IF EXISTS refresh_tokens;
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS task_checklist (
+CREATE TABLE IF NOT EXISTS project_tasks (
     id SERIAL PRIMARY KEY,
     task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
     title VARCHAR(100) NOT NULL,
@@ -87,7 +87,7 @@ CREATE INDEX idx_notes_created_at ON notes(created_at DESC);
 CREATE INDEX idx_notebook_notes ON notes(notebook_id);
 CREATE INDEX idx_user_notebooks ON notebooks(user_id, created_at DESC);
 CREATE INDEX idx_tasks_user_id ON tasks(user_id);
-CREATE INDEX idx_subtasks_task_id ON task_checklist(task_id);
+CREATE INDEX idx_subtasks_task_id ON project_tasks(task_id);
 CREATE INDEX idx_daily_tasks_user_id ON daily_tasks(user_id);
 CREATE INDEX idx_daily_tasks_expires ON daily_tasks(expires_at);
 CREATE INDEX idx_refresh_tokens_user_id ON refresh_tokens(user_id);
