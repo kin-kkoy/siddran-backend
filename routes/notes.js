@@ -162,6 +162,33 @@ router.put('/:id', checkAuth, contentUpdateLimiter, async (req, res) => {
 
     try {
 
+        // Orphan cleanup: if body is being updated, find images removed in the new body and delete them from R2
+        if (body !== undefined) {
+            const { rows: currentRows } = await pool.query(
+                `SELECT body FROM notes WHERE id = $1 AND user_id = $2`,
+                [noteID, userID]
+            )
+            if (currentRows.length > 0 && currentRows[0].body) {
+                const imageRegex = /!\[[^\]]*\]\(\/uploads\/(\d+)\/([a-f0-9-]+\.\w+)\)/g
+                const oldPaths = new Set()
+                for (const m of currentRows[0].body.matchAll(imageRegex)) {
+                    oldPaths.add(`${m[1]}|${m[2]}`)
+                }
+                const newPaths = new Set()
+                for (const m of (body || '').matchAll(imageRegex)) {
+                    newPaths.add(`${m[1]}|${m[2]}`)
+                }
+                for (const orphan of oldPaths) {
+                    if (newPaths.has(orphan)) continue
+                    const [ownerId, filename] = orphan.split('|')
+                    if (ownerId !== String(userID)) continue // safety: don't delete other users' files
+                    await storage.deleteObject({ key: `uploads/${ownerId}/${filename}` }).catch(err => {
+                        logger.error('Failed to delete orphaned image during note update:', err)
+                    })
+                }
+            }
+        }
+
         const query = `
             UPDATE notes
             SET ${updates.join(', ')}

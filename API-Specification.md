@@ -1006,9 +1006,14 @@ Issue a presigned PUT URL the frontend uses to upload an image directly to R2. B
 }
 ```
 
-`uploadUrl` is valid for 5 minutes. Frontend must `PUT` the file with `Content-Type` matching `mimeType` and `Content-Length` matching `size` (S3 signature binds these).
+`uploadUrl` is valid for 5 minutes. Frontend must `PUT` the file with the following request headers (S3 signature binds these — mismatch causes 403 SignatureDoesNotMatch):
+- `Content-Type: <mimeType>`
+- `Content-Length: <size>`
+- `Cache-Control: public, max-age=31536000, immutable`
 
 `path` is the relative reference stored in note bodies as `![alt](path)`. Frontend renders via `${R2_PUBLIC_URL}${path}` or uses `publicUrl` directly.
+
+Uploaded objects are served with `Cache-Control: public, max-age=31536000, immutable` since UUID filenames make content immutable — browsers and Cloudflare's edge cache forever.
 
 **Errors**
 | Status | Condition                              |
@@ -1022,7 +1027,9 @@ Issue a presigned PUT URL the frontend uses to upload an image directly to R2. B
 
 When a note is deleted via `DELETE /notes/:id`, the backend parses the note body for `![alt](/uploads/<userId>/<uuid>.<ext>)` references and calls `DeleteObjectCommand` on each — but only for paths matching the requesting user's ID (defence against crafted bodies referencing other users' files). Failed deletes are logged and non-fatal.
 
-This handles cleanup on note-delete only. Images orphaned by editing (image removed from a still-existing note's body) are not cleaned up in v1.
+### Note-update cleanup
+
+When a note's body is updated via `PUT /notes/:id`, the backend diffs the old and new bodies and deletes R2 objects for paths that disappeared. Same userId-match safety check applies. Failed deletes are logged and non-fatal. Skipped entirely when `body` isn't in the request payload (text-only edits like `is_favorite`/`color`/`tags` trigger zero R2 calls).
 
 ---
 
