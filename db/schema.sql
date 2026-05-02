@@ -2,6 +2,7 @@
 DROP TABLE IF EXISTS notes;
 DROP TABLE IF EXISTS notebooks;
 DROP TABLE IF EXISTS project_tasks CASCADE;
+DROP TABLE IF EXISTS projects;
 DROP TABLE IF EXISTS daily_tasks CASCADE;
 DROP TABLE IF EXISTS tasks CASCADE;
 DROP TABLE IF EXISTS refresh_tokens;
@@ -51,9 +52,20 @@ CREATE TABLE IF NOT EXISTS tasks (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS projects (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(100) NOT NULL,
+    priority VARCHAR(10) DEFAULT 'very_low',
+    is_completed BOOLEAN DEFAULT FALSE,
+    color VARCHAR(50),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS project_tasks (
     id SERIAL PRIMARY KEY,
-    task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     title VARCHAR(100) NOT NULL,
     is_completed BOOLEAN DEFAULT FALSE,
     priority VARCHAR(10) DEFAULT 'normal',
@@ -87,7 +99,8 @@ CREATE INDEX idx_notes_created_at ON notes(created_at DESC);
 CREATE INDEX idx_notebook_notes ON notes(notebook_id);
 CREATE INDEX idx_user_notebooks ON notebooks(user_id, created_at DESC);
 CREATE INDEX idx_tasks_user_id ON tasks(user_id);
-CREATE INDEX idx_subtasks_task_id ON project_tasks(task_id);
+CREATE INDEX idx_projects_user_id ON projects(user_id);
+CREATE INDEX idx_project_tasks_id ON project_tasks(project_id);
 CREATE INDEX idx_daily_tasks_user_id ON daily_tasks(user_id);
 CREATE INDEX idx_daily_tasks_expires ON daily_tasks(expires_at);
 CREATE INDEX idx_refresh_tokens_user_id ON refresh_tokens(user_id);

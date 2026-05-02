@@ -7,6 +7,7 @@ const authRouter = require ('./routes/auth')
 const notesRouter = require('./routes/notes')
 const notebooksRouter = require('./routes/notebook')
 const tasksRouter = require('./routes/tasks')
+const projectsRouter = require('./routes/projects')
 const dailyTasksRouter = require('./routes/dailyTasks')
 const settingsRouter = require('./routes/settings')
 const cookieParser = require('cookie-parser')
@@ -76,6 +77,7 @@ app.use('/auth', authRouter);
 app.use('/notes', notesRouter);
 app.use('/notebooks', notebooksRouter)
 app.use('/tasks', tasksRouter)
+app.use('/projects', projectsRouter)
 app.use('/daily-tasks', dailyTasksRouter)
 app.use('/settings', settingsRouter)
 

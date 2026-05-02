@@ -464,7 +464,7 @@ All endpoints require auth.
 
 ### `GET /tasks`
 
-List all tasks with their checklist items (cursor-paginated). Sorted: incomplete first, then by date. Rate limit: `generalLimiter`
+List all tasks (cursor-paginated). Sorted: incomplete first, then by date. Rate limit: `generalLimiter`
 
 **Query Params**
 | Param    | Type   | Default | Max |
@@ -484,18 +484,7 @@ List all tasks with their checklist items (cursor-paginated). Sorted: incomplete
       "due_date": "ISO | null",
       "is_completed": false,
       "created_at": "ISO",
-      "updated_at": "ISO",
-      "checklist": [
-        {
-          "id": 1,
-          "task_id": 1,
-          "title": "string",
-          "priority": "normal",
-          "is_completed": false,
-          "created_at": "ISO",
-          "updated_at": "ISO"
-        }
-      ]
+      "updated_at": "ISO"
     }
   ],
   "pagination": {
@@ -510,7 +499,7 @@ List all tasks with their checklist items (cursor-paginated). Sorted: incomplete
 
 ### `POST /tasks`
 
-Create a task with optional checklist items. Rate limit: `strictLimiter`. Max 100 tasks per user.
+Create a task. Rate limit: `strictLimiter`. Max 100 tasks per user.
 
 **Request Body**
 | Field         | Type     | Required | Rules                       |
@@ -519,7 +508,6 @@ Create a task with optional checklist items. Rate limit: `strictLimiter`. Max 10
 | `description` | string   | no       | Max 500 chars               |
 | `priority`    | string   | no       | Default: `"normal"`         |
 | `due_date`    | string   | no       | ISO date string             |
-| `checklist`   | array    | no       | Max 20 items, each `{ title, priority? }` (title max 100 chars) |
 
 **Response** `201`
 ```json
@@ -531,8 +519,7 @@ Create a task with optional checklist items. Rate limit: `strictLimiter`. Max 10
   "due_date": null,
   "is_completed": false,
   "created_at": "ISO",
-  "updated_at": "ISO",
-  "checklist": []
+  "updated_at": "ISO"
 }
 ```
 
@@ -556,7 +543,7 @@ Update a task (partial update). Rate limit: `contentUpdateLimiter`
 | `priority`     | string  |                      |
 | `due_date`     | string  | ISO date             |
 
-**Response** `200` — updated task with `checklist` array included.
+**Response** `200` — updated task.
 
 **Errors**
 | Status | Condition |
@@ -567,7 +554,7 @@ Update a task (partial update). Rate limit: `contentUpdateLimiter`
 
 ### `DELETE /tasks/:id`
 
-Delete a task (checklist items cascade-deleted). Rate limit: `strictLimiter`
+Delete a task. Rate limit: `strictLimiter`
 
 **Response** `200`
 ```json
@@ -581,23 +568,115 @@ Delete a task (checklist items cascade-deleted). Rate limit: `strictLimiter`
 
 ---
 
-### `POST /tasks/:taskId/checklist`
+## Projects (`/projects`)
 
-Add a checklist item to an existing task. Rate limit: `strictLimiter`
+All endpoints require auth. Projects are containers for tasks with a derived priority level.
+
+### `GET /projects`
+
+List all projects with their tasks (cursor-paginated). Sorted: incomplete first, then by date. Rate limit: `generalLimiter`
+
+**Query Params**
+| Param    | Type   | Default | Max |
+|----------|--------|---------|-----|
+| `cursor` | string | null    | —   |
+| `limit`  | number | 20      | 50  |
+
+**Response** `200`
+```json
+{
+  "projects": [
+    {
+      "id": 1,
+      "title": "string",
+      "priority": "quite_high",
+      "is_completed": false,
+      "color": null,
+      "created_at": "ISO",
+      "updated_at": "ISO",
+      "tasks": [
+        {
+          "id": 1,
+          "project_id": 1,
+          "title": "string",
+          "priority": "high",
+          "is_completed": false,
+          "created_at": "ISO",
+          "updated_at": "ISO"
+        }
+      ]
+    }
+  ],
+  "pagination": {
+    "hasNextPage": false,
+    "nextCursor": null,
+    "limit": 20
+  }
+}
+```
+
+---
+
+### `POST /projects`
+
+Create a project with tasks. Priority is derived from task priorities. Rate limit: `strictLimiter`. Max 100 projects per user.
 
 **Request Body**
-| Field      | Type   | Required | Rules                    |
-|------------|--------|----------|--------------------------|
-| `title`    | string | yes      | Non-empty, max 100 chars |
-| `priority` | string | no       | Default: `"normal"`      |
+| Field   | Type   | Required | Rules                                              |
+|---------|--------|----------|----------------------------------------------------|
+| `title` | string | yes      | Non-empty, max 100 chars                           |
+| `tasks` | array  | yes      | Array of `{ title, priority? }`. Non-empty, max 30 |
+| `color` | string | no       |                                                    |
 
 **Response** `201`
 ```json
 {
   "id": 1,
-  "task_id": 1,
   "title": "string",
-  "priority": "normal",
+  "priority": "high",
+  "is_completed": false,
+  "color": null,
+  "created_at": "ISO",
+  "updated_at": "ISO",
+  "tasks": [
+    {
+      "id": 1,
+      "project_id": 1,
+      "title": "string",
+      "priority": "high",
+      "is_completed": false,
+      "created_at": "ISO",
+      "updated_at": "ISO"
+    }
+  ]
+}
+```
+
+**Errors**
+| Status | Condition                                       |
+|--------|-------------------------------------------------|
+| 400    | Missing title, empty tasks, or max reached      |
+
+---
+
+### `PUT /projects/:id`
+
+Update a project (title, color, is_completed). Rate limit: `contentUpdateLimiter`
+
+**Request Body** (all optional)
+| Field          | Type    | Rules          |
+|----------------|---------|----------------|
+| `title`        | string  | Max 100 chars  |
+| `color`        | string  |                |
+| `is_completed` | boolean |                |
+
+**Response** `200`
+```json
+{
+  "id": 1,
+  "title": "string",
+  "priority": "high",
+  "color": "#ff0000",
   "is_completed": false,
   "created_at": "ISO",
   "updated_at": "ISO"
@@ -605,57 +684,125 @@ Add a checklist item to an existing task. Rate limit: `strictLimiter`
 ```
 
 **Errors**
-| Status | Condition                    |
-|--------|------------------------------|
-| 400    | Missing or too-long title    |
-| 404    | Parent task not found        |
+| Status | Condition |
+|--------|-----------|
+| 404    | Not found |
 
 ---
 
-### `PUT /tasks/:taskId/checklist/:checklistId`
+### `DELETE /projects/:id`
 
-Update/toggle a checklist item. Rate limit: `contentUpdateLimiter`
+Delete a project (cascades to project tasks). Rate limit: `strictLimiter`
 
-**Request Body** (all optional)
-| Field          | Type    | Rules          |
-|----------------|---------|----------------|
-| `title`        | string  | Max 100 chars  |
-| `priority`     | string  |                |
-| `is_completed` | boolean |                |
+**Response** `200`
+```json
+{ "message": "Successfully deleted project" }
+```
+
+**Errors**
+| Status | Condition |
+|--------|-----------|
+| 404    | Not found |
+
+---
+
+### `POST /projects/:projectId/tasks`
+
+Batch add tasks to a project. Recomputes project priority. Rate limit: `strictLimiter`. Max 30 tasks per project.
+
+**Request Body**
+| Field   | Type  | Required | Rules                                              |
+|---------|-------|----------|----------------------------------------------------|
+| `tasks` | array | yes      | Array of `{ title, priority? }`. Non-empty, max 30 |
+
+**Response** `201`
+```json
+{
+  "id": 1,
+  "title": "string",
+  "priority": "quite_high",
+  "is_completed": false,
+  "updated_at": "ISO",
+  "tasks": [...]
+}
+```
+
+**Errors**
+| Status | Condition                                    |
+|--------|----------------------------------------------|
+| 400    | Empty tasks, max reached, or not your project|
+
+---
+
+### `PUT /projects/:projectId/tasks`
+
+Batch update project tasks (title, priority, is_completed). Recomputes project priority. Rate limit: `contentUpdateLimiter`
+
+**Request Body**
+| Field   | Type  | Required | Rules                                                        |
+|---------|-------|----------|--------------------------------------------------------------|
+| `tasks` | array | yes      | Array of `{ id, title?, priority?, is_completed? }`. Non-empty |
+
+**Response** `200`
+```json
+{ "allTasks": [...] }
+```
+
+**Errors**
+| Status | Condition                |
+|--------|--------------------------|
+| 400    | Empty tasks array        |
+| 404    | Project not found        |
+
+---
+
+### `PUT /projects/:projectId/tasks/:taskId`
+
+Toggle completion of a single project task. Rate limit: `contentUpdateLimiter`
+
+**Request Body**
+| Field          | Type    | Required |
+|----------------|---------|----------|
+| `is_completed` | boolean | no       |
 
 **Response** `200`
 ```json
 {
   "id": 1,
-  "task_id": 1,
   "title": "string",
-  "priority": "normal",
+  "priority": "high",
   "is_completed": true,
-  "created_at": "ISO",
   "updated_at": "ISO"
 }
 ```
 
 **Errors**
-| Status | Condition              |
-|--------|------------------------|
-| 404    | Task or item not found |
+| Status | Condition                |
+|--------|--------------------------|
+| 400    | Not your project         |
+| 404    | Task not found           |
 
 ---
 
-### `DELETE /tasks/:taskId/checklist/:checklistId`
+### `DELETE /projects/:projectId/tasks`
 
-Delete a checklist item. Rate limit: `strictLimiter`
+Batch delete project tasks. Recomputes project priority. Rate limit: `strictLimiter`
+
+**Request Body**
+| Field   | Type  | Required | Rules                        |
+|---------|-------|----------|------------------------------|
+| `tasks` | array | yes      | Array of `{ id }`. Non-empty |
 
 **Response** `200`
 ```json
-{ "message": "Checklist item deleted successfully" }
+{ "message": "Successfully deleted tasks" }
 ```
 
 **Errors**
-| Status | Condition              |
-|--------|------------------------|
-| 404    | Task or item not found |
+| Status | Condition                |
+|--------|--------------------------|
+| 400    | Empty tasks array        |
+| 404    | Task or project not found|
 
 ---
 
