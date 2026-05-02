@@ -4,6 +4,7 @@ const pool = require('../db/connection');
 const checkAuth = require('../middleware/authMiddleware')
 const { contentUpdateLimiter, strictLimiter } = require('../middleware/rateLimiter')
 const logger = require('../utils/logger')
+const storage = require('../lib/storage')
 
 // get all notes
 router.get('/', checkAuth, async (req, res) => {
@@ -187,6 +188,23 @@ router.delete('/:id', checkAuth, strictLimiter, async (req, res) => {
     const {id: userID} = req.user;
 
     try {
+        // Fetch the note body first so we can clean up referenced uploads from R2
+        const { rows: noteRows } = await pool.query(
+            `SELECT body FROM notes WHERE id = $1 AND user_id = $2`,
+            [noteID, userID]
+        )
+
+        if (noteRows.length > 0 && noteRows[0].body) {
+            const matches = noteRows[0].body.matchAll(/!\[[^\]]*\]\(\/uploads\/(\d+)\/([a-f0-9-]+\.\w+)\)/g)
+            for (const m of matches) {
+                const [, ownerId, filename] = m
+                if (ownerId !== String(userID)) continue // safety: don't delete another user's files
+                await storage.deleteObject({ key: `uploads/${ownerId}/${filename}` }).catch(err => {
+                    logger.error('Failed to delete uploaded image during note deletion:', err)
+                })
+            }
+        }
+
         const result = await pool.query(
             `DELETE FROM notes
              WHERE id = $1

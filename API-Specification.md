@@ -980,6 +980,52 @@ Batch delete multiple daily tasks. Rate limit: `strictLimiter`
 
 ---
 
+## Uploads (`/uploads`)
+
+All endpoints require auth.
+
+### `POST /uploads/presign`
+
+Issue a presigned PUT URL the frontend uses to upload an image directly to R2. Backend never sees the file bytes (Vercel body limit and bandwidth efficiency). Rate limit: `uploadLimiter` (30/min).
+
+**Request Body**
+| Field      | Type   | Required | Rules                                                |
+|------------|--------|----------|------------------------------------------------------|
+| `mimeType` | string | yes      | Must be one of `image/png`, `image/jpeg`, `image/gif`, `image/webp` |
+| `size`     | number | yes      | Bytes. Max 5 MB (5,242,880)                          |
+| `filename` | string | no       | Ignored — server generates UUID-based filename       |
+
+**Response** `201`
+```json
+{
+  "uploadUrl": "https://<bucket>.<account>.r2.cloudflarestorage.com/uploads/42/9b3c.../...png?X-Amz-Signature=...",
+  "path": "/uploads/42/9b3c4f2e-7a1d-4b89-9e34-1a2c5f0d8b91.png",
+  "publicUrl": "https://pub-xxx.r2.dev/uploads/42/9b3c4f2e-7a1d-4b89-9e34-1a2c5f0d8b91.png",
+  "size": 184321,
+  "mimeType": "image/png"
+}
+```
+
+`uploadUrl` is valid for 5 minutes. Frontend must `PUT` the file with `Content-Type` matching `mimeType` and `Content-Length` matching `size` (S3 signature binds these).
+
+`path` is the relative reference stored in note bodies as `![alt](path)`. Frontend renders via `${R2_PUBLIC_URL}${path}` or uses `publicUrl` directly.
+
+**Errors**
+| Status | Condition                              |
+|--------|----------------------------------------|
+| 400    | Missing/invalid `mimeType` or `size`   |
+| 401    | Missing/invalid access token           |
+| 413    | `size` exceeds 5 MB                    |
+| 500    | R2 presign failed                      |
+
+### Note-deletion cleanup
+
+When a note is deleted via `DELETE /notes/:id`, the backend parses the note body for `![alt](/uploads/<userId>/<uuid>.<ext>)` references and calls `DeleteObjectCommand` on each — but only for paths matching the requesting user's ID (defence against crafted bodies referencing other users' files). Failed deletes are logged and non-fatal.
+
+This handles cleanup on note-delete only. Images orphaned by editing (image removed from a still-existing note's body) are not cleaned up in v1.
+
+---
+
 ## Settings (`/settings`)
 
 All endpoints require auth. Rate limit: `generalLimiter`
