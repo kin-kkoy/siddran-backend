@@ -464,7 +464,7 @@ All endpoints require auth.
 
 ### `GET /tasks`
 
-List all tasks with their checklist items (cursor-paginated). Sorted: incomplete first, then by date. Rate limit: `generalLimiter`
+List all tasks (cursor-paginated). Sorted: incomplete first, then by date. Rate limit: `generalLimiter`
 
 **Query Params**
 | Param    | Type   | Default | Max |
@@ -484,18 +484,7 @@ List all tasks with their checklist items (cursor-paginated). Sorted: incomplete
       "due_date": "ISO | null",
       "is_completed": false,
       "created_at": "ISO",
-      "updated_at": "ISO",
-      "checklist": [
-        {
-          "id": 1,
-          "task_id": 1,
-          "title": "string",
-          "priority": "normal",
-          "is_completed": false,
-          "created_at": "ISO",
-          "updated_at": "ISO"
-        }
-      ]
+      "updated_at": "ISO"
     }
   ],
   "pagination": {
@@ -510,7 +499,7 @@ List all tasks with their checklist items (cursor-paginated). Sorted: incomplete
 
 ### `POST /tasks`
 
-Create a task with optional checklist items. Rate limit: `strictLimiter`. Max 100 tasks per user.
+Create a task. Rate limit: `strictLimiter`. Max 100 tasks per user.
 
 **Request Body**
 | Field         | Type     | Required | Rules                       |
@@ -519,7 +508,6 @@ Create a task with optional checklist items. Rate limit: `strictLimiter`. Max 10
 | `description` | string   | no       | Max 500 chars               |
 | `priority`    | string   | no       | Default: `"normal"`         |
 | `due_date`    | string   | no       | ISO date string             |
-| `checklist`   | array    | no       | Max 20 items, each `{ title, priority? }` (title max 100 chars) |
 
 **Response** `201`
 ```json
@@ -531,8 +519,7 @@ Create a task with optional checklist items. Rate limit: `strictLimiter`. Max 10
   "due_date": null,
   "is_completed": false,
   "created_at": "ISO",
-  "updated_at": "ISO",
-  "checklist": []
+  "updated_at": "ISO"
 }
 ```
 
@@ -556,7 +543,7 @@ Update a task (partial update). Rate limit: `contentUpdateLimiter`
 | `priority`     | string  |                      |
 | `due_date`     | string  | ISO date             |
 
-**Response** `200` — updated task with `checklist` array included.
+**Response** `200` — updated task.
 
 **Errors**
 | Status | Condition |
@@ -567,7 +554,7 @@ Update a task (partial update). Rate limit: `contentUpdateLimiter`
 
 ### `DELETE /tasks/:id`
 
-Delete a task (checklist items cascade-deleted). Rate limit: `strictLimiter`
+Delete a task. Rate limit: `strictLimiter`
 
 **Response** `200`
 ```json
@@ -581,23 +568,115 @@ Delete a task (checklist items cascade-deleted). Rate limit: `strictLimiter`
 
 ---
 
-### `POST /tasks/:taskId/checklist`
+## Projects (`/projects`)
 
-Add a checklist item to an existing task. Rate limit: `strictLimiter`
+All endpoints require auth. Projects are containers for tasks with a derived priority level.
+
+### `GET /projects`
+
+List all projects with their tasks (cursor-paginated). Sorted: incomplete first, then by date. Rate limit: `generalLimiter`
+
+**Query Params**
+| Param    | Type   | Default | Max |
+|----------|--------|---------|-----|
+| `cursor` | string | null    | —   |
+| `limit`  | number | 20      | 50  |
+
+**Response** `200`
+```json
+{
+  "projects": [
+    {
+      "id": 1,
+      "title": "string",
+      "priority": "quite_high",
+      "is_completed": false,
+      "color": null,
+      "created_at": "ISO",
+      "updated_at": "ISO",
+      "tasks": [
+        {
+          "id": 1,
+          "project_id": 1,
+          "title": "string",
+          "priority": "high",
+          "is_completed": false,
+          "created_at": "ISO",
+          "updated_at": "ISO"
+        }
+      ]
+    }
+  ],
+  "pagination": {
+    "hasNextPage": false,
+    "nextCursor": null,
+    "limit": 20
+  }
+}
+```
+
+---
+
+### `POST /projects`
+
+Create a project with tasks. Priority is derived from task priorities. Rate limit: `strictLimiter`. Max 100 projects per user.
 
 **Request Body**
-| Field      | Type   | Required | Rules                    |
-|------------|--------|----------|--------------------------|
-| `title`    | string | yes      | Non-empty, max 100 chars |
-| `priority` | string | no       | Default: `"normal"`      |
+| Field   | Type   | Required | Rules                                              |
+|---------|--------|----------|----------------------------------------------------|
+| `title` | string | yes      | Non-empty, max 100 chars                           |
+| `tasks` | array  | yes      | Array of `{ title, priority? }`. Non-empty, max 30 |
+| `color` | string | no       |                                                    |
 
 **Response** `201`
 ```json
 {
   "id": 1,
-  "task_id": 1,
   "title": "string",
-  "priority": "normal",
+  "priority": "high",
+  "is_completed": false,
+  "color": null,
+  "created_at": "ISO",
+  "updated_at": "ISO",
+  "tasks": [
+    {
+      "id": 1,
+      "project_id": 1,
+      "title": "string",
+      "priority": "high",
+      "is_completed": false,
+      "created_at": "ISO",
+      "updated_at": "ISO"
+    }
+  ]
+}
+```
+
+**Errors**
+| Status | Condition                                       |
+|--------|-------------------------------------------------|
+| 400    | Missing title, empty tasks, or max reached      |
+
+---
+
+### `PUT /projects/:id`
+
+Update a project (title, color, is_completed). Rate limit: `contentUpdateLimiter`
+
+**Request Body** (all optional)
+| Field          | Type    | Rules          |
+|----------------|---------|----------------|
+| `title`        | string  | Max 100 chars  |
+| `color`        | string  |                |
+| `is_completed` | boolean |                |
+
+**Response** `200`
+```json
+{
+  "id": 1,
+  "title": "string",
+  "priority": "high",
+  "color": "#ff0000",
   "is_completed": false,
   "created_at": "ISO",
   "updated_at": "ISO"
@@ -605,57 +684,125 @@ Add a checklist item to an existing task. Rate limit: `strictLimiter`
 ```
 
 **Errors**
-| Status | Condition                    |
-|--------|------------------------------|
-| 400    | Missing or too-long title    |
-| 404    | Parent task not found        |
+| Status | Condition |
+|--------|-----------|
+| 404    | Not found |
 
 ---
 
-### `PUT /tasks/:taskId/checklist/:checklistId`
+### `DELETE /projects/:id`
 
-Update/toggle a checklist item. Rate limit: `contentUpdateLimiter`
+Delete a project (cascades to project tasks). Rate limit: `strictLimiter`
 
-**Request Body** (all optional)
-| Field          | Type    | Rules          |
-|----------------|---------|----------------|
-| `title`        | string  | Max 100 chars  |
-| `priority`     | string  |                |
-| `is_completed` | boolean |                |
+**Response** `200`
+```json
+{ "message": "Successfully deleted project" }
+```
+
+**Errors**
+| Status | Condition |
+|--------|-----------|
+| 404    | Not found |
+
+---
+
+### `POST /projects/:projectId/tasks`
+
+Batch add tasks to a project. Recomputes project priority. Rate limit: `strictLimiter`. Max 30 tasks per project.
+
+**Request Body**
+| Field   | Type  | Required | Rules                                              |
+|---------|-------|----------|----------------------------------------------------|
+| `tasks` | array | yes      | Array of `{ title, priority? }`. Non-empty, max 30 |
+
+**Response** `201`
+```json
+{
+  "id": 1,
+  "title": "string",
+  "priority": "quite_high",
+  "is_completed": false,
+  "updated_at": "ISO",
+  "tasks": [...]
+}
+```
+
+**Errors**
+| Status | Condition                                    |
+|--------|----------------------------------------------|
+| 400    | Empty tasks, max reached, or not your project|
+
+---
+
+### `PUT /projects/:projectId/tasks`
+
+Batch update project tasks (title, priority, is_completed). Recomputes project priority. Rate limit: `contentUpdateLimiter`
+
+**Request Body**
+| Field   | Type  | Required | Rules                                                        |
+|---------|-------|----------|--------------------------------------------------------------|
+| `tasks` | array | yes      | Array of `{ id, title?, priority?, is_completed? }`. Non-empty |
+
+**Response** `200`
+```json
+{ "allTasks": [...] }
+```
+
+**Errors**
+| Status | Condition                |
+|--------|--------------------------|
+| 400    | Empty tasks array        |
+| 404    | Project not found        |
+
+---
+
+### `PUT /projects/:projectId/tasks/:taskId`
+
+Toggle completion of a single project task. Rate limit: `contentUpdateLimiter`
+
+**Request Body**
+| Field          | Type    | Required |
+|----------------|---------|----------|
+| `is_completed` | boolean | no       |
 
 **Response** `200`
 ```json
 {
   "id": 1,
-  "task_id": 1,
   "title": "string",
-  "priority": "normal",
+  "priority": "high",
   "is_completed": true,
-  "created_at": "ISO",
   "updated_at": "ISO"
 }
 ```
 
 **Errors**
-| Status | Condition              |
-|--------|------------------------|
-| 404    | Task or item not found |
+| Status | Condition                |
+|--------|--------------------------|
+| 400    | Not your project         |
+| 404    | Task not found           |
 
 ---
 
-### `DELETE /tasks/:taskId/checklist/:checklistId`
+### `DELETE /projects/:projectId/tasks`
 
-Delete a checklist item. Rate limit: `strictLimiter`
+Batch delete project tasks. Recomputes project priority. Rate limit: `strictLimiter`
+
+**Request Body**
+| Field   | Type  | Required | Rules                        |
+|---------|-------|----------|------------------------------|
+| `tasks` | array | yes      | Array of `{ id }`. Non-empty |
 
 **Response** `200`
 ```json
-{ "message": "Checklist item deleted successfully" }
+{ "message": "Successfully deleted tasks" }
 ```
 
 **Errors**
-| Status | Condition              |
-|--------|------------------------|
-| 404    | Task or item not found |
+| Status | Condition                |
+|--------|--------------------------|
+| 400    | Empty tasks array        |
+| 404    | Task or project not found|
 
 ---
 
@@ -776,6 +923,113 @@ Delete a daily task. Rate limit: `strictLimiter`
 | Status | Condition |
 |--------|-----------|
 | 404    | Not found |
+
+---
+
+### `PATCH /daily-tasks/batch-complete`
+
+Batch update completion status of multiple daily tasks. Rate limit: `contentUpdateLimiter`
+
+**Request Body**
+| Field   | Type  | Required | Rules                                              |
+|---------|-------|----------|----------------------------------------------------|
+| `tasks` | array | yes      | Array of `{ id, is_completed }`. Non-empty.        |
+
+**Response** `200`
+```json
+[
+  {
+    "id": 1,
+    "title": "string",
+    "priority": "normal",
+    "is_completed": true,
+    "created_at": "ISO",
+    "updated_at": "ISO",
+    "expires_at": "ISO"
+  }
+]
+```
+
+**Errors**
+| Status | Condition                          |
+|--------|------------------------------------|
+| 400    | Missing or empty tasks array       |
+| 404    | A task was not found or expired    |
+
+---
+
+### `DELETE /daily-tasks/batch-delete`
+
+Batch delete multiple daily tasks. Rate limit: `strictLimiter`
+
+**Request Body**
+| Field   | Type  | Required | Rules                        |
+|---------|-------|----------|------------------------------|
+| `tasks` | array | yes      | Array of `{ id }`. Non-empty.|
+
+**Response** `200`
+```json
+{ "message": "Successfully deleted list of daily tasks" }
+```
+
+**Errors**
+| Status | Condition                    |
+|--------|------------------------------|
+| 400    | Missing or empty tasks array |
+| 404    | A task was not found         |
+
+---
+
+## Uploads (`/uploads`)
+
+All endpoints require auth.
+
+### `POST /uploads/presign`
+
+Issue a presigned PUT URL the frontend uses to upload an image directly to R2. Backend never sees the file bytes (Vercel body limit and bandwidth efficiency). Rate limit: `uploadLimiter` (30/min).
+
+**Request Body**
+| Field      | Type   | Required | Rules                                                |
+|------------|--------|----------|------------------------------------------------------|
+| `mimeType` | string | yes      | Must be one of `image/png`, `image/jpeg`, `image/gif`, `image/webp` |
+| `size`     | number | yes      | Bytes. Max 5 MB (5,242,880)                          |
+| `filename` | string | no       | Ignored — server generates UUID-based filename       |
+
+**Response** `201`
+```json
+{
+  "uploadUrl": "https://<bucket>.<account>.r2.cloudflarestorage.com/uploads/42/9b3c.../...png?X-Amz-Signature=...",
+  "path": "/uploads/42/9b3c4f2e-7a1d-4b89-9e34-1a2c5f0d8b91.png",
+  "publicUrl": "https://pub-xxx.r2.dev/uploads/42/9b3c4f2e-7a1d-4b89-9e34-1a2c5f0d8b91.png",
+  "size": 184321,
+  "mimeType": "image/png"
+}
+```
+
+`uploadUrl` is valid for 5 minutes. Frontend must `PUT` the file with the following request headers (S3 signature binds these — mismatch causes 403 SignatureDoesNotMatch):
+- `Content-Type: <mimeType>`
+- `Content-Length: <size>`
+- `Cache-Control: public, max-age=31536000, immutable`
+
+`path` is the relative reference stored in note bodies as `![alt](path)`. Frontend renders via `${R2_PUBLIC_URL}${path}` or uses `publicUrl` directly.
+
+Uploaded objects are served with `Cache-Control: public, max-age=31536000, immutable` since UUID filenames make content immutable — browsers and Cloudflare's edge cache forever.
+
+**Errors**
+| Status | Condition                              |
+|--------|----------------------------------------|
+| 400    | Missing/invalid `mimeType` or `size`   |
+| 401    | Missing/invalid access token           |
+| 413    | `size` exceeds 5 MB                    |
+| 500    | R2 presign failed                      |
+
+### Note-deletion cleanup
+
+When a note is deleted via `DELETE /notes/:id`, the backend parses the note body for `![alt](/uploads/<userId>/<uuid>.<ext>)` references and calls `DeleteObjectCommand` on each — but only for paths matching the requesting user's ID (defence against crafted bodies referencing other users' files). Failed deletes are logged and non-fatal.
+
+### Note-update cleanup
+
+When a note's body is updated via `PUT /notes/:id`, the backend diffs the old and new bodies and deletes R2 objects for paths that disappeared. Same userId-match safety check applies. Failed deletes are logged and non-fatal. Skipped entirely when `body` isn't in the request payload (text-only edits like `is_favorite`/`color`/`tags` trigger zero R2 calls).
 
 ---
 

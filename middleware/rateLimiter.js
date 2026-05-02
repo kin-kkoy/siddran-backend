@@ -36,4 +36,13 @@ const authLimiter = rateLimit({
     legacyHeaders: false,
 })
 
-module.exports = { generalLimiter, contentUpdateLimiter, strictLimiter, authLimiter }
+// Upload limiter - for image presign requests. Higher per-minute cap than strictLimiter to support pasting multiple images at once
+const uploadLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 30,
+    message: { error: 'Too many uploads, slow down.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+})
+
+module.exports = { generalLimiter, contentUpdateLimiter, strictLimiter, authLimiter, uploadLimiter }
