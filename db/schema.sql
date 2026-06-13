@@ -138,3 +138,47 @@ CREATE TABLE IF NOT EXISTS sandbox_items (
 
 CREATE INDEX IF NOT EXISTS idx_sandboxes_user ON sandboxes(user_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sandbox_items_sandbox ON sandbox_items(sandbox_id);
+
+-- Calendar (planning surface) — see references/calendar-roadmap.md.
+-- IF NOT EXISTS / ADD COLUMN IF NOT EXISTS so this whole block can be applied on its own
+-- to an existing DB without re-running the destructive DROP/CREATE block at the top.
+-- A "block" is a first-class calendar item: standalone (sticky/event) when ref_type IS NULL,
+-- or linked to an existing entity. ref_id is TEXT (no FK) because it is polymorphic — note/
+-- task/project/daily ids are INTEGER (SERIAL) while sandbox ids are UUID; a deleted target
+-- simply leaves an orphaned standalone block (degrade gracefully). Times are TIMESTAMPTZ
+-- (store UTC, render local). ref_type is validated against an allow-list in routes/events.js.
+CREATE TABLE IF NOT EXISTS calendar_events (
+    id          SERIAL PRIMARY KEY,
+    user_id     INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    title       VARCHAR(200) NOT NULL,
+    description TEXT,
+    start_at    TIMESTAMPTZ NOT NULL,
+    end_at      TIMESTAMPTZ,
+    all_day     BOOLEAN DEFAULT FALSE,
+    color       VARCHAR(50),
+    ref_type    TEXT,
+    ref_id      TEXT,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Daily-task recurrence: extend the existing ephemeral daily_tasks. A row WITH a recurrence
+-- is non-expiring (the 24h cleanup in routes/dailyTasks.js skips recurrence IS NOT NULL); the
+-- calendar expands it into virtual per-day instances. recurrence is 'every-day'|'weekdays'|
+-- 'weekends' or a JSON mask '{"mask":[7 booleans], index 0 = Sunday}'. time is optional 'HH:MM'.
+ALTER TABLE daily_tasks ADD COLUMN IF NOT EXISTS recurrence TEXT;
+ALTER TABLE daily_tasks ADD COLUMN IF NOT EXISTS time TEXT;
+
+-- Per-day completion for recurring dailies (ephemeral dailies keep using is_completed).
+-- A row present = that recurring daily is done on that date.
+CREATE TABLE IF NOT EXISTS daily_completions (
+    id            SERIAL PRIMARY KEY,
+    user_id       INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    daily_task_id INTEGER REFERENCES daily_tasks(id) ON DELETE CASCADE,
+    date          DATE NOT NULL,
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (daily_task_id, date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_calendar_events_user_range ON calendar_events(user_id, start_at);
+CREATE INDEX IF NOT EXISTS idx_daily_completions_user_date ON daily_completions(user_id, date);

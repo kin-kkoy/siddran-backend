@@ -14,6 +14,28 @@ router.use(checkAuth);
 router.get('/', async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 20, 50);
     const cursor = req.query.cursor;
+    const { dueFrom, dueTo } = req.query;
+
+    // Range mode (used by the Calendar overlay): return ALL dated tasks whose due_date falls
+    // in [dueFrom, dueTo) — no pagination, bounded by the window. The client re-buckets by
+    // local day, so a slightly generous UTC window is fine.
+    if (dueFrom && dueTo) {
+        try {
+            const { rows: tasks } = await pool.query(
+                `SELECT id, title, description, priority, due_date, is_completed, created_at, updated_at FROM tasks
+                 WHERE user_id = $1
+                 AND due_date IS NOT NULL
+                 AND due_date >= $2
+                 AND due_date < $3
+                 ORDER BY due_date ASC`,
+                [req.user.id, dueFrom, dueTo]
+            );
+            return res.json({ tasks });
+        } catch (error) {
+            logger.error(error);
+            return res.status(500).json({ error: 'Failed to fetch tasks' });
+        }
+    }
 
     try {
         let query, values;
