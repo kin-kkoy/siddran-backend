@@ -37,6 +37,43 @@ router.get('/', async (req, res) => {
         }
     }
 
+    // Dated mode (Calendar overlay): ALL tasks that have a due_date, no pagination. The calendar
+    // fetches these once and derives every month/view client-side (no per-view refetch).
+    if (req.query.dated) {
+        try {
+            const { rows: tasks } = await pool.query(
+                `SELECT id, title, description, priority, due_date, is_completed, created_at, updated_at FROM tasks
+                 WHERE user_id = $1
+                 AND due_date IS NOT NULL
+                 ORDER BY due_date ASC`,
+                [req.user.id]
+            );
+            return res.json({ tasks });
+        } catch (error) {
+            logger.error(error);
+            return res.status(500).json({ error: 'Failed to fetch tasks' });
+        }
+    }
+
+    // Undated mode (Calendar's "unscheduled" drawer): incomplete tasks with no due_date.
+    if (req.query.undated) {
+        try {
+            const { rows: tasks } = await pool.query(
+                `SELECT id, title, description, priority, due_date, is_completed, created_at, updated_at FROM tasks
+                 WHERE user_id = $1
+                 AND due_date IS NULL
+                 AND is_completed = FALSE
+                 ORDER BY created_at DESC
+                 LIMIT 100`,
+                [req.user.id]
+            );
+            return res.json({ tasks });
+        } catch (error) {
+            logger.error(error);
+            return res.status(500).json({ error: 'Failed to fetch tasks' });
+        }
+    }
+
     try {
         let query, values;
 
