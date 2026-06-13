@@ -1,9 +1,12 @@
 const rateLimit = require('express-rate-limit')
 
-// General limiter - for most GET routes
+// General limiter - for most GET routes. A single authed page load makes ~9 GETs (settings,
+// notes, notebooks, tasks, daily-tasks, projects, events, tasks?dated, tasks?undated), so 100/15min
+// trips after ~11 reloads. 400 gives comfortable headroom for normal navigation/refreshing while
+// still bounding abuse per IP.
 const generalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100,
+    max: 400,
     message: { error: `Man chill. You're requesting allat` },
     standardHeaders: true,
     legacyHeaders: false,
