@@ -259,6 +259,7 @@ router.delete('/:notebookId/notes/:noteId', checkAuth, strictLimiter, async (req
 
 // delete notebook (notes are still alive just not grouped anymore)
 router.delete('/:id', checkAuth, strictLimiter, async (req, res) => {
+    let client;
     try {
         // FIRST: Check if user owns this notebook
         const ownershipCheck = await pool.query(
@@ -270,31 +271,35 @@ router.delete('/:id', checkAuth, strictLimiter, async (req, res) => {
             return res.status(404).json({ error: 'Notebook not found or you do not have permission to delete it' });
         }
 
-        // Use transaction to ensure atomicity
-        await pool.query('BEGIN');
+        // Dedicated client so BEGIN/UPDATE/DELETE/COMMIT all run on the SAME connection
+        // (pool.query can pick a different connection per statement, breaking the transaction).
+        client = await pool.connect();
+        await client.query('BEGIN');
 
         // THEN: UNLINK ALL NOTES before deleting
-        await pool.query(
+        await client.query(
             `UPDATE notes
              SET notebook_id = NULL
              WHERE notebook_id = $1 AND user_id = $2`, [req.params.id, req.user.id]
         );
 
         // ONLY THEN we delete the notebook itself
-        await pool.query(
+        await client.query(
             `DELETE FROM notebooks
              WHERE id = $1
              AND user_id = $2`, [req.params.id, req.user.id]
         );
 
-        await pool.query('COMMIT');
+        await client.query('COMMIT');
 
         res.json({message: 'Notebook has been deleted'})
 
     } catch (error) {
-        await pool.query('ROLLBACK');
+        if (client) { try { await client.query('ROLLBACK'); } catch { /* connection already broken */ } }
         logger.error(`Failed to delete notebook: `, error);
         res.status(500).json({error: 'Something went wrong while deleting notebook'})
+    } finally {
+        if (client) client.release();
     }
 });
 

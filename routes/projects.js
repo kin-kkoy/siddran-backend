@@ -106,6 +106,7 @@ router.post('/', strictLimiter, async (req, res) => {
     if(tasks.length > 30) return res.status(400).json({error: "Too many items in the checklist per req (30 only)"})
 
 
+    let client;
     try {  // title, priority, is_completed, color, created_at, updated_at
 
         // FOR NOW: Limit standard user's task count to 100 except for owner mwehhe. Like the other limiters, limit/max will be increased/removed if premium user
@@ -116,13 +117,15 @@ router.post('/', strictLimiter, async (req, res) => {
         if(parseInt(projectCount.rows[0].count) >= 100) return res.status(400).json({error: "You have reached the maximum number of projects"}); // "Upgrade to premium to add more or unlimited!"
 
 
-        await pool.query('BEGIN'); // Start Batch Transaction
+        // Dedicated client so the whole transaction runs on one connection.
+        client = await pool.connect();
+        await client.query('BEGIN'); // Start Batch Transaction
 
         // calculate priority
         const priority = getPrio(tasks);
 
         // Insert main project
-        const { rows: projectRows } = await pool.query(
+        const { rows: projectRows } = await client.query(
             `INSERT INTO projects (user_id, title, priority, color)
              VALUES ($1, $2, $3, $4)
              RETURNING id, title, priority, is_completed, color, created_at, updated_at`,
@@ -138,7 +141,7 @@ router.post('/', strictLimiter, async (req, res) => {
         for (const task of tasks){
             if(!task.title || task.title.trim().length === 0) continue; // don't add basically
 
-            const {rows} = await pool.query(
+            const {rows} = await client.query(
                 `INSERT INTO project_tasks (project_id, title, priority)
                  VALUES ($1, $2, $3)
                  RETURNING id, project_id, title, priority, is_completed, created_at, updated_at`,
@@ -146,13 +149,15 @@ router.post('/', strictLimiter, async (req, res) => {
             createdTasks.push(rows[0]);
         }
 
-        await pool.query(`COMMIT`); // End ---
+        await client.query(`COMMIT`); // End ---
         res.status(201).json({ ...newProject, tasks: createdTasks });
 
     } catch (error) {
-        await pool.query(`ROLLBACK`);
+        if (client) { try { await client.query(`ROLLBACK`) } catch { /* connection already broken */ } }
         logger.error(error);
         res.status(500).json({ error: 'Failed to create project' })
+    } finally {
+        if (client) client.release();
     }
 });
 
@@ -219,6 +224,7 @@ router.post('/:projectId/tasks', strictLimiter, async (req, res) => {
     if(!tasks || !Array.isArray(tasks) ||tasks.length <= 0) return res.status(400).json({error: 'Must provide list of tasks for this project'})
     if(tasks.length > 30) return res.status(400).json({error: "Too many tasks in the project (30 only)"})
 
+    let client;
     try {
 
         // Verify that the project exists and that it's the user's
@@ -236,20 +242,21 @@ router.post('/:projectId/tasks', strictLimiter, async (req, res) => {
         if(parseInt(taskCount.rows[0].count) >= 30) return res.status(400).json({error: "You have reached the maximum number of tasks for this project"}); // "Upgrade to premium to add more or unlimited!"
 
         
-        await pool.query(`BEGIN`);
+        client = await pool.connect();
+        await client.query(`BEGIN`);
 
 
         // store all tasks with the created ones appended incrementally
-        const allTasks = await pool.query(
+        const allTasks = await client.query(
             `SELECT priority FROM project_tasks
              WHERE project_id = $1`, [projectId]
         );
-        
+
 
         for(const task of tasks){
             if(!task.title || task.title.trim().length === 0) continue; // don't add basically
 
-            const {rows} = await pool.query(
+            const {rows} = await client.query(
                 `INSERT INTO project_tasks (project_id, title, priority)
                  VALUES ($1, $2, $3)
                  RETURNING id, project_id, title, priority, is_completed, created_at, updated_at`,
@@ -262,26 +269,28 @@ router.post('/:projectId/tasks', strictLimiter, async (req, res) => {
         const projPrio = getPrio(allTasks.rows);
 
         // then update the project's priority
-        const { rows: updatedProject } = await pool.query(
+        const { rows: updatedProject } = await client.query(
             `UPDATE projects
              SET priority = COALESCE ($1, priority), updated_at = CURRENT_TIMESTAMP
              WHERE id = $2
-             RETURNING id, title, priority, is_completed, updated_at`, 
+             RETURNING id, title, priority, is_completed, updated_at`,
             [projPrio, projectId]
         );
         if(updatedProject.length === 0){
-            await pool.query('ROLLBACK')
+            await client.query('ROLLBACK')
             return res.status(400).json({ error: "Failed to update project's priority level" })
         }
 
 
-        await pool.query(`COMMIT`); // End ---
+        await client.query(`COMMIT`); // End ---
         res.status(201).json({ ...updatedProject[0], tasks: allTasks.rows });
 
     } catch (error) {
-        await pool.query(`ROLLBACK`);
+        if (client) { try { await client.query(`ROLLBACK`) } catch { /* connection already broken */ } }
         logger.error(error);
         res.status(500).json({ error: 'Failed to add task/s' })
+    } finally {
+        if (client) client.release();
     }
 });
 
@@ -293,6 +302,7 @@ router.put('/:projectId/tasks', contentUpdateLimiter, async (req, res) => {
     // Validation
     if(!tasks || !Array.isArray(tasks) ||tasks.length <= 0) return res.status(400).json({error: 'Must provide list of tasks'})
 
+    let client;
     try {
 
         // Verify that the project exists and that it's the user's
@@ -303,11 +313,12 @@ router.put('/:projectId/tasks', contentUpdateLimiter, async (req, res) => {
         if(parseInt(project.rows[0].count) === 0) return res.status(400).json({error: "You do not own this project"});
 
         
-        await pool.query(`BEGIN`)
+        client = await pool.connect();
+        await client.query(`BEGIN`)
 
 
         for(const task of tasks){
-            const {rows} = await pool.query(
+            const {rows} = await client.query(
                 `UPDATE project_tasks
                  SET
                     title = COALESCE ($1, title),
@@ -321,7 +332,7 @@ router.put('/:projectId/tasks', contentUpdateLimiter, async (req, res) => {
         };
 
         // used to store all tasks; For if ever a task's priority would be changed or would change
-        const { rows: allTasks } = await pool.query(
+        const { rows: allTasks } = await client.query(
             `SELECT id, project_id, title, priority, is_completed, created_at, updated_at
              FROM project_tasks
              WHERE project_id = $1
@@ -331,7 +342,7 @@ router.put('/:projectId/tasks', contentUpdateLimiter, async (req, res) => {
 
         // Would've added a comparison here where if a task's prio has changed than only then will we recompute the project's priority but for now since I'm the only user we will just always update the priority instead.
 
-        const prioUpdate = await pool.query(
+        const prioUpdate = await client.query(
             `UPDATE projects
              SET priority = COALESCE ($1, priority)
              WHERE id = $2 AND user_id = $3
@@ -339,17 +350,19 @@ router.put('/:projectId/tasks', contentUpdateLimiter, async (req, res) => {
             [getPrio(allTasks), projectId, req.user.id]
         )
         if(prioUpdate.rows.length === 0){
-            await pool.query('ROLLBACK')
+            await client.query('ROLLBACK')
             return res.status(404).json({ error: 'No project found' })
         }
 
-        await pool.query(`COMMIT`)
+        await client.query(`COMMIT`)
         res.status(200).json({ allTasks })
 
     } catch (error) {
-        await pool.query(`ROLLBACK`);
+        if (client) { try { await client.query(`ROLLBACK`) } catch { /* connection already broken */ } }
         logger.error(error);
         res.status(500).json({ error: 'Failed to update tasks' })
+    } finally {
+        if (client) client.release();
     }
 });
 
@@ -361,6 +374,7 @@ router.delete('/:projectId/tasks', strictLimiter, async (req, res) => {
     // Validation
     if(!tasks || !Array.isArray(tasks) ||tasks.length <= 0) return res.status(400).json({error: 'Must provide list of tasks'})
 
+    let client;
     try {
 
         // Verify that the project exists and that it's the user's
@@ -371,24 +385,25 @@ router.delete('/:projectId/tasks', strictLimiter, async (req, res) => {
         if(parseInt(project.rows[0].count) === 0) return res.status(400).json({error: "You do not own this project"});
 
         
-        await pool.query(`BEGIN`)
+        client = await pool.connect();
+        await client.query(`BEGIN`)
 
 
         for(const task of tasks){
-            const {rowCount} = await pool.query(
+            const {rowCount} = await client.query(
                 `DELETE FROM project_tasks
                  WHERE id = $1 AND project_id = $2`,
                 [task.id, projectId]
             )
             if (rowCount === 0){
-                await pool.query('ROLLBACK')
+                await client.query('ROLLBACK')
                 return res.status(404).json({ error: `Task not found`})
             }
         }
 
-        
+
         // recalculate project priority since it's a DELETE and not a complete.
-        const {rows: allTasks} = await pool.query(
+        const {rows: allTasks} = await client.query(
             `SELECT id, project_id, title, priority, is_completed, created_at, updated_at
              FROM project_tasks
              WHERE project_id = $1
@@ -397,25 +412,27 @@ router.delete('/:projectId/tasks', strictLimiter, async (req, res) => {
         )
         const newPrio = allTasks.length > 0 ? getPrio(allTasks) : 'very_low'; // it's actually going to be deleted but just to be sure i'll make it `very_low` because it'd turn into NaN if no safeguard like this.
 
-        const {rows} = await pool.query(
+        const {rows} = await client.query(
             `UPDATE projects
              SET priority = COALESCE($1, priority)
              WHERE id = $2`,
             [newPrio, projectId]
         );
         if(rows.length === 0){
-            await pool.query('ROLLBACK')
+            await client.query('ROLLBACK')
             return res.status(404).json({ error: `Project not found`})
         }
 
 
-        await pool.query(`COMMIT`)
+        await client.query(`COMMIT`)
         res.status(200).json({ message: `Successfully deleted tasks` })
 
     } catch (error) {
-        await pool.query(`ROLLBACK`);
+        if (client) { try { await client.query(`ROLLBACK`) } catch { /* connection already broken */ } }
         logger.error(error);
         res.status(500).json({ error: 'Failed to update tasks' })
+    } finally {
+        if (client) client.release();
     }
 });
 

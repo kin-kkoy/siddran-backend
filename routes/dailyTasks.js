@@ -78,6 +78,7 @@ router.post('/', strictLimiter, async (req, res) => {
 
     if(tasks.length > 20) return res.status(400).json({error: "Too many daily tasks per req (20 only)"})
 
+    let client;
     try {
 
         // FOR NOW: Limit standard user's task count to 100 except for owner mwehhe. Like the other limiters, limit/max will be increased/removed if premium user
@@ -91,7 +92,9 @@ router.post('/', strictLimiter, async (req, res) => {
         if(currentDTCount + tasks.length > 50) return res.status(400).json({ error: `You can only have 50 active daily tasks at once. Currently have: ${currentDTCount}`})
 
 
-        await pool.query('BEGIN'); // Start Batch Transaction
+        // Dedicated client so the whole transaction runs on one connection.
+        client = await pool.connect();
+        await client.query('BEGIN'); // Start Batch Transaction
 
         const createdTasks = [];
         const expiresAt = new Date();
@@ -100,20 +103,22 @@ router.post('/', strictLimiter, async (req, res) => {
         for (const task of tasks){
             if(!task.title || task.title.trim().length === 0) continue; // don't add basically
 
-            const {rows} = await pool.query(
+            const {rows} = await client.query(
                 `INSERT INTO daily_tasks (user_id, title, priority, expires_at)
                  VALUES ($1, $2, $3, $4)
                  RETURNING id, title, priority, is_completed, created_at, updated_at, expires_at`, [req.user.id, task.title.trim(), task.priority || 'normal', expiresAt]);
             createdTasks.push(rows[0]);
         }
 
-        await pool.query(`COMMIT`); // End ---
+        await client.query(`COMMIT`); // End ---
         res.status(201).json(createdTasks);
 
     } catch (error) {
-        await pool.query('ROLLBACK')
+        if (client) { try { await client.query('ROLLBACK') } catch { /* connection already broken */ } }
         logger.error(`Error in adding daily tasks:`, error)
         res.status(500).json({error: `Something went wrong while adding list of daily tasks`})
+    } finally {
+        if (client) client.release();
     }
 })
 
@@ -125,16 +130,18 @@ router.patch('/batch-complete', contentUpdateLimiter, async (req, res) => {
         return res.status(400).json({ error: 'Array of tasks required!'})
     }
 
+    let client;
     try {
 
-        await pool.query('BEGIN'); // Start Batch Transaction
+        client = await pool.connect();
+        await client.query('BEGIN'); // Start Batch Transaction
 
         const updatedTasks = [];
 
         for(const task of tasks){
             if(!task.id) continue;
 
-            const {rows} = await pool.query(
+            const {rows} = await client.query(
                 `UPDATE daily_tasks
                  SET is_completed = COALESCE($1, is_completed), updated_at = CURRENT_TIMESTAMP
                  WHERE id = $2
@@ -147,13 +154,15 @@ router.patch('/batch-complete', contentUpdateLimiter, async (req, res) => {
             updatedTasks.push(rows[0]);
         }
 
-        await pool.query(`COMMIT`); // End ---
+        await client.query(`COMMIT`); // End ---
         res.status(200).json(updatedTasks);
 
     } catch (error) {
-        await pool.query('ROLLBACK')
+        if (client) { try { await client.query('ROLLBACK') } catch { /* connection already broken */ } }
         logger.error(`Error updating tasks:`,error);
         res.status(500).json({error: `Something went wrong while updating list of daily tasks`})
+    } finally {
+        if (client) client.release();
     }
 })
 
@@ -190,32 +199,36 @@ router.delete('/batch-delete', strictLimiter, async (req, res) => {
         return res.status(400).json({ error: 'Array of tasks required!'})
     }
 
+    let client;
     try {
 
-        await pool.query('BEGIN')
+        client = await pool.connect();
+        await client.query('BEGIN')
 
         for(const task of tasks){
             if(!task.id) continue;
 
-            const { rowCount } = await pool.query(
+            const { rowCount } = await client.query(
                 `DELETE FROM daily_tasks
                 WHERE id = $1
                 AND user_id = $2`, [task.id, req.user.id]
             );
 
             if(rowCount === 0){
-                await pool.query('ROLLBACK')
+                await client.query('ROLLBACK')
                 return res.status(404).json({ error: `Daily task not found`})
             }
         }
 
-        await pool.query(`COMMIT`); // End ---
+        await client.query(`COMMIT`); // End ---
         res.status(200).json({message: `Successfully deleted list of daily tasks`});
-        
+
     } catch (error) {
-        await pool.query('ROLLBACK')
+        if (client) { try { await client.query('ROLLBACK') } catch { /* connection already broken */ } }
         logger.error(`Error deleting tasks:`,error);
         res.status(500).json({error: `Something went wrong while deleting list of daily tasks`})
+    } finally {
+        if (client) client.release();
     }
 })
 
