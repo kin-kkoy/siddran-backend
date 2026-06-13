@@ -59,7 +59,16 @@ app.use(cors({
   origin: process.env.FRONTEND_URL,  // FRONTEND URL
   credentials: true  // Allow cookies to be sent!
 }));
-app.use(express.json({ limit: '100kb' }));
+// Sandbox item batches (many strokes with point arrays) are legitimately larger than
+// other endpoints' payloads, so give /sandboxes a bigger body limit. Everything else
+// stays at the tight 100kb cap. (Images are stored as R2 URLs, not base64, so payloads
+// stay modest even with the higher limit.)
+const standardJson = express.json({ limit: '100kb' })
+const sandboxJson = express.json({ limit: '5mb' })
+app.use((req, res, next) => {
+  if (req.path.startsWith('/sandboxes')) return sandboxJson(req, res, next)
+  return standardJson(req, res, next)
+});
 app.use(cookieParser()); // duh parses the cookie
 
 // Request logging - 'dev' format in development, 'combined' in production for more detail
@@ -93,6 +102,9 @@ app.use((req, res) => {
 // another safety net for the whole server. If an error happens and is not caught by the try-catches, this guy will catch it and show it in console, without it the whole server would crash.
 app.use((err, req, res, next) => {
   logger.error('Server error:', err);
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Request body too large' });
+  }
   res.status(500).json({ error: 'Internal server error' });
 });
 

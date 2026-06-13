@@ -195,21 +195,30 @@ router.post('/:id/items/batch', contentUpdateLimiter, async (req, res) => {
     }
     const deleteIds = deleteList.filter(isUuid);
 
+    // Ownership check before any write (single autocommit query, no transaction).
+    let owns;
     try {
-        // Ownership check before any write.
-        const owns = await pool.query(
+        owns = await pool.query(
             `SELECT 1 FROM sandboxes WHERE id = $1 AND user_id = $2`,
             [id, req.user.id]
         );
-        if (owns.rows.length === 0) return res.status(404).json({ error: 'Sandbox not found' });
+    } catch (error) {
+        logger.error(error);
+        return res.status(500).json({ error: 'Failed to sync sandbox items' })
+    }
+    if (owns.rows.length === 0) return res.status(404).json({ error: 'Sandbox not found' });
 
-
-        await pool.query('BEGIN');
+    // A dedicated client so BEGIN/INSERT/COMMIT all run on the SAME connection.
+    // pool.query() can pick a different pooled connection per statement, which breaks
+    // transactions (and can leave an aborted connection in the pool) under concurrency.
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
 
         for (const item of upsertList) {
             // The ON CONFLICT WHERE guard means an id that somehow belongs to another board
             // is left untouched rather than hijacked into this one.
-            await pool.query(
+            await client.query(
                 `INSERT INTO sandbox_items
                     (id, sandbox_id, type, x, y, w, h, rotation, z_index, payload, updated_at)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, CURRENT_TIMESTAMP)
@@ -240,7 +249,7 @@ router.post('/:id/items/batch', contentUpdateLimiter, async (req, res) => {
         }
 
         if (deleteIds.length > 0) {
-            await pool.query(
+            await client.query(
                 `DELETE FROM sandbox_items
                  WHERE sandbox_id = $1 AND id = ANY($2::uuid[])`,
                 [id, deleteIds]
@@ -248,7 +257,7 @@ router.post('/:id/items/batch', contentUpdateLimiter, async (req, res) => {
         }
 
         // Recompute the denormalized count + bump updated_at in the same transaction.
-        const { rows } = await pool.query(
+        const { rows } = await client.query(
             `UPDATE sandboxes
              SET item_count = (SELECT COUNT(*) FROM sandbox_items WHERE sandbox_id = $1),
                  updated_at = CURRENT_TIMESTAMP
@@ -257,13 +266,15 @@ router.post('/:id/items/batch', contentUpdateLimiter, async (req, res) => {
             [id, req.user.id]
         );
 
-        await pool.query('COMMIT');
+        await client.query('COMMIT');
 
         res.status(200).json(rows[0]);
     } catch (error) {
-        await pool.query('ROLLBACK');
+        try { await client.query('ROLLBACK'); } catch { /* connection already broken */ }
         logger.error(error);
         res.status(500).json({ error: 'Failed to sync sandbox items' })
+    } finally {
+        client.release();
     }
 });
 
