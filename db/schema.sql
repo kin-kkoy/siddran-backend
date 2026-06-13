@@ -1,4 +1,6 @@
 -- for dev purposes
+DROP TABLE IF EXISTS sandbox_items CASCADE;
+DROP TABLE IF EXISTS sandboxes CASCADE;
 DROP TABLE IF EXISTS notes;
 DROP TABLE IF EXISTS notebooks;
 DROP TABLE IF EXISTS project_tasks CASCADE;
@@ -104,3 +106,35 @@ CREATE INDEX idx_project_tasks_id ON project_tasks(project_id);
 CREATE INDEX idx_daily_tasks_user_id ON daily_tasks(user_id);
 CREATE INDEX idx_daily_tasks_expires ON daily_tasks(expires_at);
 CREATE INDEX idx_refresh_tokens_user_id ON refresh_tokens(user_id);
+
+-- Sandbox (infinite canvas) cloud persistence — see references/sandbox-roadmap.md Phase 5.
+-- IF NOT EXISTS so these two statements can be applied on their own to an existing DB
+-- without re-running the DROP/CREATE block above. user_id is INTEGER to match users.id
+-- (SERIAL), while board/item ids are UUID — sandbox_items.id is client-generated
+-- (crypto.randomUUID) so optimistic writes have a stable id.
+CREATE TABLE IF NOT EXISTS sandboxes (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL,
+    item_count  INTEGER NOT NULL DEFAULT 0,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS sandbox_items (
+    id          UUID PRIMARY KEY,
+    sandbox_id  UUID NOT NULL REFERENCES sandboxes(id) ON DELETE CASCADE,
+    type        TEXT NOT NULL CHECK (type IN ('stroke','shape','image','note','task','text','connector')),
+    x           REAL NOT NULL,
+    y           REAL NOT NULL,
+    w           REAL,
+    h           REAL,
+    rotation    REAL DEFAULT 0,
+    z_index     INTEGER DEFAULT 0,
+    payload     JSONB NOT NULL,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_sandboxes_user ON sandboxes(user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sandbox_items_sandbox ON sandbox_items(sandbox_id);
