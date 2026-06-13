@@ -324,7 +324,14 @@ router.post('/logout', async (req, res) => {
         logger.error(`Logout error:`, error)
     }
 
-    res.clearCookie(`refreshToken`)
+    // clearCookie only deletes the cookie if these attributes match the ones it
+    // was set with — a cross-site (SameSite=None; Secure) cookie won't be cleared
+    // by an attribute-less clearCookie in some browsers.
+    res.clearCookie(`refreshToken`, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    })
     res.json({message: "Logged out"})
 })
 
