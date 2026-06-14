@@ -10,6 +10,20 @@ const storage = require('../lib/storage')
 router.get('/', checkAuth, async (req, res) => {
     const { id } = req.user;
 
+    // Lightweight picker list (calendar block linking): id + title only, capped. ?picker=1
+    if (req.query.picker) {
+        try {
+            const { rows: items } = await pool.query(
+                `SELECT id, title FROM notes WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 200`,
+                [id]
+            );
+            return res.json({ items });
+        } catch (error) {
+            logger.error(error);
+            return res.status(500).json({ error: 'Failed to fetch notes' });
+        }
+    }
+
     // pagination: basically give the data to user by chunks instead of everything to prevent data overload or self DOS. Used cursor for this instead of offset
     const limit = Math.min(parseInt(req.query.limit) || 20, 50);
     const cursor = req.query.cursor; // ISO date string or null for the first page

@@ -16,6 +16,20 @@ router.get('/', async (req, res) => {
     const cursor = req.query.cursor;
     const { dueFrom, dueTo } = req.query;
 
+    // Lightweight picker list (calendar block linking): id + title only, capped. ?picker=1
+    if (req.query.picker) {
+        try {
+            const { rows: items } = await pool.query(
+                `SELECT id, title FROM tasks WHERE user_id = $1 ORDER BY created_at DESC LIMIT 200`,
+                [req.user.id]
+            );
+            return res.json({ items });
+        } catch (error) {
+            logger.error(error);
+            return res.status(500).json({ error: 'Failed to fetch tasks' });
+        }
+    }
+
     // Range mode (used by the Calendar overlay): return ALL dated tasks whose due_date falls
     // in [dueFrom, dueTo) — no pagination, bounded by the window. The client re-buckets by
     // local day, so a slightly generous UTC window is fine.

@@ -98,35 +98,52 @@ router.post('/', strictLimiter, async (req, res) => {
     }
 })
 
-// PUT update a block. COALESCE keeps unspecified fields; clearing a link (ref_type → null)
-// is handled in P5 (needs an explicit-null path).
+// PUT update a block. The SET clause is built from only the keys PRESENT in the body, so an
+// explicit null CLEARS a field (e.g. unlinking → ref_type/ref_id = null, or end_at = null when a
+// timed block becomes all-day) while an absent key is left untouched (so drag-retime, which only
+// sends start_at/end_at/all_day, never clobbers a link). Replaces the old COALESCE form, which
+// couldn't tell "absent" from "null" and thus couldn't clear a link.
 router.put('/:id', contentUpdateLimiter, async (req, res) => {
     const { id } = req.params;
-    const { title, description, start_at, end_at, all_day, color, ref_type, ref_id } = req.body;
+    const body = req.body || {};
 
-    if (title && title.length > 200) {
+    if (body.title != null && String(body.title).length > 200) {
         return res.status(400).json({ error: 'Title must be 200 characters or less' });
     }
 
-    if (ref_type != null && !REF_TYPES.includes(ref_type)) {
+    if (body.ref_type != null && !REF_TYPES.includes(body.ref_type)) {
         return res.status(400).json({ error: 'Invalid ref_type' });
     }
+
+    const allowed = ['title', 'description', 'start_at', 'end_at', 'all_day', 'color', 'ref_type', 'ref_id'];
+    const sets = [];
+    const values = [];
+    for (const key of allowed) {
+        if (!Object.prototype.hasOwnProperty.call(body, key)) continue;
+        let val = body[key];
+        if ((key === 'title' || key === 'description') && typeof val === 'string') val = val.trim();
+        // A link is a pair: if the type is cleared, clear the id too.
+        if (key === 'ref_id' && body.ref_type === null) val = null;
+        values.push(val);
+        sets.push(`${key} = $${values.length}`);
+    }
+
+    if (sets.length === 0) {
+        return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    values.push(id);
+    const idParam = `$${values.length}`;
+    values.push(req.user.id);
+    const userParam = `$${values.length}`;
 
     try {
         const { rows } = await pool.query(
             `UPDATE calendar_events
-             SET title = COALESCE($1, title),
-                 description = COALESCE($2, description),
-                 start_at = COALESCE($3, start_at),
-                 end_at = COALESCE($4, end_at),
-                 all_day = COALESCE($5, all_day),
-                 color = COALESCE($6, color),
-                 ref_type = COALESCE($7, ref_type),
-                 ref_id = COALESCE($8, ref_id),
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = $9 AND user_id = $10
+             SET ${sets.join(', ')}, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ${idParam} AND user_id = ${userParam}
              RETURNING id, title, description, start_at, end_at, all_day, color, ref_type, ref_id, created_at, updated_at`,
-            [title?.trim(), description?.trim(), start_at, end_at, all_day, color, ref_type, ref_id, id, req.user.id]
+            values
         );
 
         if (rows.length === 0) {

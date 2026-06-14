@@ -51,6 +51,22 @@ router.get('/', async (req, res) => {
         }
     }
 
+    // Lightweight picker list (calendar block linking): active/recurring dailies, id + title. ?picker=1
+    if (req.query.picker) {
+        try {
+            const { rows: items } = await pool.query(
+                `SELECT id, title FROM daily_tasks
+                 WHERE user_id = $1 AND (expires_at > NOW() OR recurrence IS NOT NULL)
+                 ORDER BY created_at DESC LIMIT 200`,
+                [userId]
+            );
+            return res.json({ items });
+        } catch (error) {
+            logger.error(`Error fetching daily task picker list:`, error);
+            return res.status(500).json({ error: `Something went wrong while getting daily tasks` });
+        }
+    }
+
     //pagination (explanation in notes.js)
     const limit = Math.min(parseInt(req.query.limit) || 20, 50);
     const cursor = req.query.cursor;

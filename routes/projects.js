@@ -32,6 +32,20 @@ router.get('/', async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 20, 50);
     const cursor = req.query.cursor;
 
+    // Lightweight picker list (calendar block linking): id + title only, capped. ?picker=1
+    if (req.query.picker) {
+        try {
+            const { rows: items } = await pool.query(
+                `SELECT id, title FROM projects WHERE user_id = $1 ORDER BY created_at DESC LIMIT 200`,
+                [req.user.id]
+            );
+            return res.json({ items });
+        } catch (error) {
+            logger.error(error);
+            return res.status(500).json({ error: 'Failed to fetch projects' });
+        }
+    }
+
     try {
         let query, values;
 
