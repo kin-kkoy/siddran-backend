@@ -34,6 +34,23 @@ const removeExpiredTasks = async (userId) => {
 router.get('/', async (req, res) => {
     const userId = req.user.id
 
+    // Calendar mode: every RECURRING daily (recurrence IS NOT NULL = non-expiring, repeats),
+    // non-paginated, so the calendar plots ALL recurring rows — not just the paginated first page.
+    if (req.query.recurring === '1') {
+        try {
+            const { rows } = await pool.query(
+                `SELECT id, title, priority, is_completed, created_at, updated_at, expires_at, recurrence, time
+                 FROM daily_tasks
+                 WHERE user_id = $1 AND recurrence IS NOT NULL
+                 ORDER BY created_at DESC`, [userId]
+            );
+            return res.json({ dailyTasks: rows });
+        } catch (error) {
+            logger.error(`Error fetching recurring daily tasks:`, error);
+            return res.status(500).json({ error: `Something went wrong while getting recurring daily tasks` });
+        }
+    }
+
     //pagination (explanation in notes.js)
     const limit = Math.min(parseInt(req.query.limit) || 20, 50);
     const cursor = req.query.cursor;
@@ -74,6 +91,88 @@ router.get('/', async (req, res) => {
     } catch (error) {
         logger.error(`Error fetching tasks:`,error);
         res.status(500).json({error: `Something went wrong while getting list of daily tasks`})
+    }
+})
+
+// ---- Per-day completions for RECURRING dailies (calendar check-off) ----
+// A completion row's presence = that recurring daily is "done" on that date. Ephemeral (one-off)
+// dailies keep their own is_completed and are untouched here.
+
+// Range fetch (optional ?from=&to= 'YYYY-MM-DD'); omitted = all completions for the user.
+router.get('/completions', async (req, res) => {
+    const userId = req.user.id
+    const { from, to } = req.query
+
+    try {
+        const values = [userId]
+        let query = `SELECT daily_task_id, to_char(date, 'YYYY-MM-DD') AS date
+                     FROM daily_completions WHERE user_id = $1`
+        if (from) { values.push(from); query += ` AND date >= $${values.length}` }
+        if (to)   { values.push(to);   query += ` AND date <= $${values.length}` }
+
+        const { rows } = await pool.query(query, values)
+        res.json({ completions: rows })
+    } catch (error) {
+        logger.error(`Error fetching daily completions:`, error)
+        res.status(500).json({ error: `Something went wrong while getting daily completions` })
+    }
+})
+
+// Toggle one recurring daily's completion on one date. { date:'YYYY-MM-DD', done:bool }:
+// done → upsert the row, !done → delete it. Single-row, no transaction needed.
+router.post('/:id/completions', contentUpdateLimiter, async (req, res) => {
+    const userId = req.user.id
+    const { id } = req.params
+    const { date, done } = req.body
+
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({ error: 'A valid date (YYYY-MM-DD) is required' })
+    }
+
+    try {
+        // Only a recurring daily the user owns can be checked off per-day.
+        const owns = await pool.query(
+            `SELECT 1 FROM daily_tasks WHERE id = $1 AND user_id = $2 AND recurrence IS NOT NULL`,
+            [id, userId]
+        )
+        if (owns.rowCount === 0) return res.status(404).json({ error: 'Recurring daily task not found' })
+
+        if (done) {
+            await pool.query(
+                `INSERT INTO daily_completions (user_id, daily_task_id, date)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (daily_task_id, date) DO NOTHING`,
+                [userId, id, date]
+            )
+        } else {
+            await pool.query(
+                `DELETE FROM daily_completions WHERE user_id = $1 AND daily_task_id = $2 AND date = $3`,
+                [userId, id, date]
+            )
+        }
+
+        res.json({ daily_task_id: Number(id), date, done: !!done })
+    } catch (error) {
+        logger.error(`Error toggling daily completion:`, error)
+        res.status(500).json({ error: `Something went wrong while updating the completion` })
+    }
+})
+
+// GET one daily task by id (Calendar deep-link → TasksHub daily detail opener). User-scoped.
+// Registered after GET '/completions' so the literal route still matches first.
+router.get('/:id', async (req, res) => {
+    const { id } = req.params
+    try {
+        const { rows } = await pool.query(
+            `SELECT id, title, priority, is_completed, created_at, updated_at, expires_at, recurrence, time
+             FROM daily_tasks WHERE id = $1 AND user_id = $2`,
+            [id, req.user.id]
+        )
+        if (rows.length === 0) return res.status(404).json({ error: 'Daily task not found' })
+        res.json(rows[0])
+    } catch (error) {
+        logger.error(`Error fetching daily task:`, error)
+        res.status(500).json({ error: `Something went wrong while getting the daily task` })
     }
 })
 

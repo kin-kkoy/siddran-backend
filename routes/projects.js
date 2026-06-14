@@ -92,6 +92,30 @@ router.get('/', async (req, res) => {
     }
 });
 
+// GET one project (with its tasks) by id — used by the Calendar deep-link → TasksHub bundle
+// detail opener. Mirrors the per-project shape from GET '/'. User-scoped.
+router.get('/:id', async (req, res) => {
+    const { id } = req.params
+    try {
+        const { rows } = await pool.query(
+            `SELECT id, title, priority, is_completed, color, created_at, updated_at
+             FROM projects WHERE id = $1 AND user_id = $2`,
+            [id, req.user.id]
+        )
+        if (rows.length === 0) return res.status(404).json({ error: 'Project not found' })
+
+        const { rows: tasks } = await pool.query(
+            `SELECT id, project_id, title, priority, is_completed, created_at, updated_at
+             FROM project_tasks WHERE project_id = $1 ORDER BY created_at ASC`,
+            [id]
+        )
+        res.json({ ...rows[0], tasks })
+    } catch (error) {
+        logger.error(error)
+        res.status(500).json({ error: 'Failed to fetch project' })
+    }
+})
+
 // POST create a project
 router.post('/', strictLimiter, async (req, res) => {
     const { title, tasks, color } = req.body;  // priorities is an array that contains 3 elements: x amount of low/normal/high

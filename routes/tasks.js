@@ -112,6 +112,23 @@ router.get('/', async (req, res) => {
 });
 
 // POST a task
+// GET one task by id (used by the Calendar deep-link → TasksHub detail opener). User-scoped.
+router.get('/:id', async (req, res) => {
+    const { id } = req.params
+    try {
+        const { rows } = await pool.query(
+            `SELECT id, title, description, priority, due_date, is_completed, created_at, updated_at
+             FROM tasks WHERE id = $1 AND user_id = $2`,
+            [id, req.user.id]
+        )
+        if (rows.length === 0) return res.status(404).json({ error: 'Task not found' })
+        res.json(rows[0])
+    } catch (error) {
+        logger.error(error)
+        res.status(500).json({ error: 'Failed to fetch task' })
+    }
+})
+
 router.post('/', strictLimiter, async (req, res) => {
     const { title, description, priority, due_date } = req.body;
 
