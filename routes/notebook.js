@@ -49,6 +49,34 @@ router.get('/', checkAuth, async (req, res) => {
     }
 });
 
+// Notes for several notebooks in ONE query (replaces the client's N+1 of GET /:id/notes per
+// notebook on load). Returns { notesByNotebook: { [id]: notes[] } }. Declared before /:id/notes
+// so "notes-batch" can't be captured as an :id.
+router.get('/notes-batch', checkAuth, async (req, res) => {
+    const ids = String(req.query.ids || '')
+        .split(',')
+        .map(s => parseInt(s, 10))
+        .filter(Number.isInteger)
+    if (ids.length === 0) return res.json({ notesByNotebook: {} })
+
+    try {
+        const { rows } = await pool.query(
+            `SELECT id, title, body, created_at, updated_at, notebook_id, is_favorite, color, tags
+             FROM notes
+             WHERE user_id = $1 AND notebook_id = ANY($2::int[])
+             ORDER BY created_at DESC`,
+            [req.user.id, ids]
+        )
+        const notesByNotebook = {}
+        for (const id of ids) notesByNotebook[id] = [] // seed so empty notebooks come back as []
+        for (const n of rows) notesByNotebook[n.notebook_id].push(n)
+        res.json({ notesByNotebook })
+    } catch (error) {
+        logger.error('Failed to batch-fetch notebook notes: ', error)
+        res.status(500).json({ error: 'Something went wrong while getting notebook notes' })
+    }
+})
+
 // get notes in a specific notebook (with pagination)
 router.get('/:id/notes', checkAuth, async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 50, 100);
