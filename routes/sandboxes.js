@@ -4,6 +4,7 @@ const pool = require('../db/connection')
 const checkAuth = require('../middleware/authMiddleware');
 const { strictLimiter, contentUpdateLimiter } = require('../middleware/rateLimiter');
 const logger = require('../utils/logger')
+const { bulkValues } = require('../utils/sqlBulk')
 
 
 router.use(checkAuth);
@@ -215,13 +216,23 @@ router.post('/:id/items/batch', contentUpdateLimiter, async (req, res) => {
     try {
         await client.query('BEGIN');
 
-        for (const item of upsertList) {
-            // The ON CONFLICT WHERE guard means an id that somehow belongs to another board
-            // is left untouched rather than hijacked into this one.
+        if (upsertList.length > 0) {
+            // One multi-row upsert instead of N round-trips (a 500-item flush was 500 INSERTs).
+            // The ON CONFLICT WHERE guard means an id that somehow belongs to another board is
+            // left untouched rather than hijacked into this one (EXCLUDED.sandbox_id == this id).
+            const { text, values } = bulkValues(
+                upsertList.map(item => [
+                    item.id, id, item.type,
+                    num(item.x), num(item.y), numOrNull(item.w), numOrNull(item.h),
+                    num(item.rotation), Math.trunc(num(item.z_index)), JSON.stringify(item.payload),
+                ]),
+                1,
+                ['uuid', 'uuid', 'text', 'real', 'real', 'real', 'real', 'real', 'int', 'jsonb']
+            );
             await client.query(
                 `INSERT INTO sandbox_items
-                    (id, sandbox_id, type, x, y, w, h, rotation, z_index, payload, updated_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, CURRENT_TIMESTAMP)
+                    (id, sandbox_id, type, x, y, w, h, rotation, z_index, payload)
+                 VALUES ${text}
                  ON CONFLICT (id) DO UPDATE SET
                     type = EXCLUDED.type,
                     x = EXCLUDED.x,
@@ -232,19 +243,8 @@ router.post('/:id/items/batch', contentUpdateLimiter, async (req, res) => {
                     z_index = EXCLUDED.z_index,
                     payload = EXCLUDED.payload,
                     updated_at = CURRENT_TIMESTAMP
-                 WHERE sandbox_items.sandbox_id = $2`,
-                [
-                    item.id,
-                    id,
-                    item.type,
-                    num(item.x),
-                    num(item.y),
-                    numOrNull(item.w),
-                    numOrNull(item.h),
-                    num(item.rotation),
-                    Math.trunc(num(item.z_index)),
-                    JSON.stringify(item.payload),
-                ]
+                 WHERE sandbox_items.sandbox_id = EXCLUDED.sandbox_id`,
+                values
             );
         }
 

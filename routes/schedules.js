@@ -4,6 +4,18 @@ const pool = require('../db/connection')
 const checkAuth = require('../middleware/authMiddleware')
 const { strictLimiter, contentUpdateLimiter } = require('../middleware/rateLimiter')
 const logger = require('../utils/logger')
+const { bulkValues } = require('../utils/sqlBulk')
+
+// Map a Designer block to a calendar_events row tuple (column order below). ref_id is TEXT
+// (polymorphic), and is only kept when ref_type is set.
+const eventRow = (e, userId, scheduleId) => [
+    userId, e.title.trim(), e.description?.trim() || null,
+    e.start_at, e.end_at || null, e.all_day ?? false, e.color || null,
+    e.ref_type || null, e.ref_type ? (e.ref_id ?? null) : null, scheduleId,
+]
+const EVENT_CASTS = ['int', 'text', 'text', 'timestamptz', 'timestamptz', 'boolean', 'text', 'text', 'text', 'int']
+const EVENT_COLS = '(user_id, title, description, start_at, end_at, all_day, color, ref_type, ref_id, schedule_id)'
+const EVENT_RETURNING = 'id, title, description, start_at, end_at, all_day, color, ref_type, ref_id, schedule_id, created_at, updated_at'
 
 // A "schedule" groups the blocks stamped from the Schedule Designer (a designed weekly timetable
 // applied across a date range), so a whole term can be renamed / recoloured / bulk-deleted as a unit.
@@ -55,16 +67,12 @@ router.post('/', strictLimiter, async (req, res) => {
         )
         const schedule = sRows[0]
 
-        const created = []
-        for (const e of events) {
-            const { rows } = await client.query(
-                `INSERT INTO calendar_events (user_id, title, description, start_at, end_at, all_day, color, ref_type, ref_id, schedule_id)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                 RETURNING id, title, description, start_at, end_at, all_day, color, ref_type, ref_id, schedule_id, created_at, updated_at`,
-                [req.user.id, e.title.trim(), e.description?.trim() || null, e.start_at, e.end_at || null, e.all_day ?? false, e.color || null, e.ref_type || null, e.ref_type ? (e.ref_id ?? null) : null, schedule.id]
-            )
-            created.push(rows[0])
-        }
+        // All blocks in one multi-row INSERT (was one INSERT per block, up to 500).
+        const ev = bulkValues(events.map(e => eventRow(e, req.user.id, schedule.id)), 1, EVENT_CASTS)
+        const { rows: created } = await client.query(
+            `INSERT INTO calendar_events ${EVENT_COLS} VALUES ${ev.text} RETURNING ${EVENT_RETURNING}`,
+            ev.values
+        )
 
         await client.query('COMMIT')
         res.status(201).json({ schedule: { ...schedule, block_count: created.length }, events: created })
@@ -143,16 +151,12 @@ router.put('/:id/restamp', strictLimiter, async (req, res) => {
 
         await client.query(`DELETE FROM calendar_events WHERE schedule_id = $1 AND user_id = $2`, [id, req.user.id])
 
-        const created = []
-        for (const e of events) {
-            const { rows } = await client.query(
-                `INSERT INTO calendar_events (user_id, title, description, start_at, end_at, all_day, color, ref_type, ref_id, schedule_id)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                 RETURNING id, title, description, start_at, end_at, all_day, color, ref_type, ref_id, schedule_id, created_at, updated_at`,
-                [req.user.id, e.title.trim(), e.description?.trim() || null, e.start_at, e.end_at || null, e.all_day ?? false, e.color || null, e.ref_type || null, e.ref_type ? (e.ref_id ?? null) : null, id]
-            )
-            created.push(rows[0])
-        }
+        // Re-stamp the whole set in one multi-row INSERT (was one INSERT per block, up to 500).
+        const ev = bulkValues(events.map(e => eventRow(e, req.user.id, id)), 1, EVENT_CASTS)
+        const { rows: created } = await client.query(
+            `INSERT INTO calendar_events ${EVENT_COLS} VALUES ${ev.text} RETURNING ${EVENT_RETURNING}`,
+            ev.values
+        )
 
         await client.query('COMMIT')
         res.json({ schedule: { ...sRows[0], block_count: created.length }, events: created })

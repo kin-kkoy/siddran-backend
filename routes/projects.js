@@ -4,9 +4,12 @@ const pool = require('../db/connection')
 const checkAuth = require('../middleware/authMiddleware');
 const { strictLimiter, contentUpdateLimiter } = require('../middleware/rateLimiter');
 const logger = require('../utils/logger')
+const { bulkValues } = require('../utils/sqlBulk')
 
 
 router.use(checkAuth);
+
+const TASK_RETURNING = 'id, project_id, title, priority, is_completed, created_at, updated_at'
 
 
 function getPrio(projectTasks){
@@ -173,18 +176,19 @@ router.post('/', strictLimiter, async (req, res) => {
         const newProject = projectRows[0];
 
 
-        // insert checklist items or tasks of that project
-        const createdTasks = [];
-
-        for (const task of tasks){
-            if(!task.title || task.title.trim().length === 0) continue; // don't add basically
-
-            const {rows} = await client.query(
-                `INSERT INTO project_tasks (project_id, title, priority)
-                 VALUES ($1, $2, $3)
-                 RETURNING id, project_id, title, priority, is_completed, created_at, updated_at`,
-                [newProject.id, task.title.trim(), task.priority || 'normal']);
-            createdTasks.push(rows[0]);
+        // insert checklist items or tasks of that project — one multi-row INSERT, not one per task
+        let createdTasks = [];
+        const valid = tasks.filter(t => t.title && t.title.trim().length > 0);
+        if (valid.length > 0) {
+            const { text, values } = bulkValues(
+                valid.map(t => [newProject.id, t.title.trim(), t.priority || 'normal']),
+                1, ['int', 'text', 'text']
+            );
+            const r = await client.query(
+                `INSERT INTO project_tasks (project_id, title, priority) VALUES ${text} RETURNING ${TASK_RETURNING}`,
+                values
+            );
+            createdTasks = r.rows;
         }
 
         await client.query(`COMMIT`); // End ---
@@ -291,16 +295,18 @@ router.post('/:projectId/tasks', strictLimiter, async (req, res) => {
         );
 
 
-        for(const task of tasks){
-            if(!task.title || task.title.trim().length === 0) continue; // don't add basically
-
-            const {rows} = await client.query(
-                `INSERT INTO project_tasks (project_id, title, priority)
-                 VALUES ($1, $2, $3)
-                 RETURNING id, project_id, title, priority, is_completed, created_at, updated_at`,
-                [projectId, task.title.trim(), task.priority || 'normal']
+        const valid = tasks.filter(t => t.title && t.title.trim().length > 0);
+        if (valid.length > 0) {
+            // One multi-row INSERT instead of one per task; append the created rows for the prio calc.
+            const { text, values } = bulkValues(
+                valid.map(t => [projectId, t.title.trim(), t.priority || 'normal']),
+                1, ['int', 'text', 'text']
             );
-            allTasks.rows.push(rows[0]);
+            const r = await client.query(
+                `INSERT INTO project_tasks (project_id, title, priority) VALUES ${text} RETURNING ${TASK_RETURNING}`,
+                values
+            );
+            allTasks.rows.push(...r.rows);
         }
 
         // get the new priority level of the project considering the new tasks added
@@ -355,19 +361,22 @@ router.put('/:projectId/tasks', contentUpdateLimiter, async (req, res) => {
         await client.query(`BEGIN`)
 
 
-        for(const task of tasks){
-            const {rows} = await client.query(
-                `UPDATE project_tasks
-                 SET
-                    title = COALESCE ($1, title),
-                    priority = COALESCE ($2, priority),
-                    is_completed = COALESCE ($3, is_completed),
-                    updated_at = CURRENT_TIMESTAMP
-                 WHERE id = $4 AND project_id = $5
-                 RETURNING id, title, priority, is_completed, created_at, updated_at`,
-                [task.title?.trim(), task.priority, task.is_completed, task.id, projectId]
-            );
-        };
+        // One UPDATE … FROM (VALUES …) instead of one UPDATE per task; each row keeps its own
+        // COALESCE semantics (a null field leaves the existing column untouched).
+        const upd = bulkValues(
+            tasks.map(t => [t.id, t.title?.trim() ?? null, t.priority ?? null, t.is_completed ?? null]),
+            2, ['int', 'text', 'text', 'boolean']
+        );
+        await client.query(
+            `UPDATE project_tasks pt
+             SET title = COALESCE(v.title, pt.title),
+                 priority = COALESCE(v.priority, pt.priority),
+                 is_completed = COALESCE(v.is_completed, pt.is_completed),
+                 updated_at = CURRENT_TIMESTAMP
+             FROM (VALUES ${upd.text}) AS v(id, title, priority, is_completed)
+             WHERE pt.id = v.id AND pt.project_id = $1`,
+            [projectId, ...upd.values]
+        );
 
         // used to store all tasks; For if ever a task's priority would be changed or would change
         const { rows: allTasks } = await client.query(
@@ -427,16 +436,20 @@ router.delete('/:projectId/tasks', strictLimiter, async (req, res) => {
         await client.query(`BEGIN`)
 
 
-        for(const task of tasks){
-            const {rowCount} = await client.query(
-                `DELETE FROM project_tasks
-                 WHERE id = $1 AND project_id = $2`,
-                [task.id, projectId]
-            )
-            if (rowCount === 0){
-                await client.query('ROLLBACK')
-                return res.status(404).json({ error: `Task not found`})
-            }
+        // One DELETE for the batch; roll back (404) if any requested id is missing/invalid or
+        // belongs to another project — matching the original all-or-nothing behaviour.
+        const delIds = [...new Set(tasks.map(t => t.id).filter(x => x != null))];
+        if (delIds.length !== tasks.length) {
+            await client.query('ROLLBACK')
+            return res.status(404).json({ error: `Task not found`})
+        }
+        const { rows: deletedTasks } = await client.query(
+            `DELETE FROM project_tasks WHERE id = ANY($1::int[]) AND project_id = $2 RETURNING id`,
+            [delIds, projectId]
+        )
+        if (deletedTasks.length !== delIds.length) {
+            await client.query('ROLLBACK')
+            return res.status(404).json({ error: `Task not found`})
         }
 
 

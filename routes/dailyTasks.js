@@ -4,6 +4,7 @@ const pool = require('../db/connection')
 const checkAuth = require('../middleware/authMiddleware')
 const { strictLimiter, contentUpdateLimiter } = require('../middleware/rateLimiter')
 const logger = require('../utils/logger')
+const { bulkValues } = require('../utils/sqlBulk')
 
 router.use(checkAuth)
 
@@ -202,7 +203,6 @@ router.post('/', strictLimiter, async (req, res) => {
 
     if(tasks.length > 20) return res.status(400).json({error: "Too many daily tasks per req (20 only)"})
 
-    let client;
     try {
 
         // FOR NOW: Limit standard user's task count to 100 except for owner mwehhe. Like the other limiters, limit/max will be increased/removed if premium user
@@ -215,37 +215,31 @@ router.post('/', strictLimiter, async (req, res) => {
         const currentDTCount = parseInt(dailyTaskCount.rows[0].count);
         if(currentDTCount + tasks.length > 50) return res.status(400).json({ error: `You can only have 50 active daily tasks at once. Currently have: ${currentDTCount}`})
 
-
-        // Dedicated client so the whole transaction runs on one connection.
-        client = await pool.connect();
-        await client.query('BEGIN'); // Start Batch Transaction
-
-        const createdTasks = [];
         const expiresAt = new Date();
         expiresAt.setHours(expiresAt.getHours() + 24); // 24 hours
 
-        for (const task of tasks){
-            if(!task.title || task.title.trim().length === 0) continue; // don't add basically
+        const valid = tasks.filter(t => t.title && t.title.trim().length > 0);
+        if (valid.length === 0) return res.status(201).json([]);
 
-            // expires_at is always set (NOT NULL), but recurring rows are skipped by the
-            // cleanup, so their expiry never fires — they persist and repeat.
-            const {rows} = await client.query(
-                `INSERT INTO daily_tasks (user_id, title, priority, expires_at, recurrence, time)
-                 VALUES ($1, $2, $3, $4, $5, $6)
-                 RETURNING id, title, priority, is_completed, created_at, updated_at, expires_at, recurrence, time`,
-                 [req.user.id, task.title.trim(), task.priority || 'normal', expiresAt, normalizeRecurrence(task.recurrence), task.time || null]);
-            createdTasks.push(rows[0]);
-        }
-
-        await client.query(`COMMIT`); // End ---
+        // One multi-row INSERT instead of one per task. expires_at is always set (NOT NULL), but
+        // recurring rows are skipped by the cleanup so their expiry never fires — they persist and
+        // repeat. (No transaction needed: a single statement is already atomic.)
+        const { text, values } = bulkValues(
+            valid.map(t => [req.user.id, t.title.trim(), t.priority || 'normal', expiresAt, normalizeRecurrence(t.recurrence), t.time || null]),
+            1,
+            ['int', 'text', 'text', null, 'text', 'text'] // expires_at left uncast so the Date binds as a timestamp
+        );
+        const { rows: createdTasks } = await pool.query(
+            `INSERT INTO daily_tasks (user_id, title, priority, expires_at, recurrence, time)
+             VALUES ${text}
+             RETURNING id, title, priority, is_completed, created_at, updated_at, expires_at, recurrence, time`,
+            values
+        );
         res.status(201).json(createdTasks);
 
     } catch (error) {
-        if (client) { try { await client.query('ROLLBACK') } catch { /* connection already broken */ } }
         logger.error(`Error in adding daily tasks:`, error)
         res.status(500).json({error: `Something went wrong while adding list of daily tasks`})
-    } finally {
-        if (client) client.release();
     }
 })
 
@@ -256,40 +250,31 @@ router.patch('/batch-complete', contentUpdateLimiter, async (req, res) => {
     if(!tasks || !Array.isArray(tasks) || tasks.length === 0){
         return res.status(400).json({ error: 'Array of tasks required!'})
     }
+    if(tasks.length > 100) return res.status(400).json({ error: 'Too many tasks in one batch (100 max)' })
 
-    let client;
+    const valid = tasks.filter(t => t.id != null);
+    if (valid.length === 0) return res.status(200).json([]);
+
     try {
+        // One UPDATE … FROM (VALUES …) instead of one UPDATE per task. Each row carries its own
+        // is_completed; only rows that match (owned + not expired, or recurring) come back.
+        const { text, values } = bulkValues(valid.map(t => [t.id, t.is_completed ?? null]), 2, ['int', 'boolean']);
+        const { rows: updatedTasks } = await pool.query(
+            `UPDATE daily_tasks d
+             SET is_completed = COALESCE(v.is_completed, d.is_completed), updated_at = CURRENT_TIMESTAMP
+             FROM (VALUES ${text}) AS v(id, is_completed)
+             WHERE d.id = v.id
+             AND d.user_id = $1
+             AND (d.expires_at > NOW() OR d.recurrence IS NOT NULL)
+             RETURNING d.id, d.title, d.priority, d.is_completed, d.created_at, d.updated_at, d.expires_at, d.recurrence, d.time`,
+            [req.user.id, ...values]
+        )
 
-        client = await pool.connect();
-        await client.query('BEGIN'); // Start Batch Transaction
-
-        const updatedTasks = [];
-
-        for(const task of tasks){
-            if(!task.id) continue;
-
-            const {rows} = await client.query(
-                `UPDATE daily_tasks
-                 SET is_completed = COALESCE($1, is_completed), updated_at = CURRENT_TIMESTAMP
-                 WHERE id = $2
-                 AND user_id = $3
-                 AND (expires_at > NOW() OR recurrence IS NOT NULL)
-                 RETURNING id, title, priority, is_completed, created_at, updated_at, expires_at, recurrence, time`,
-                 [task.is_completed, task.id, req.user.id]
-            )
-
-            updatedTasks.push(rows[0]);
-        }
-
-        await client.query(`COMMIT`); // End ---
         res.status(200).json(updatedTasks);
 
     } catch (error) {
-        if (client) { try { await client.query('ROLLBACK') } catch { /* connection already broken */ } }
         logger.error(`Error updating tasks:`,error);
         res.status(500).json({error: `Something went wrong while updating list of daily tasks`})
-    } finally {
-        if (client) client.release();
     }
 })
 
@@ -348,19 +333,16 @@ router.delete('/batch-delete', strictLimiter, async (req, res) => {
         client = await pool.connect();
         await client.query('BEGIN')
 
-        for(const task of tasks){
-            if(!task.id) continue;
-
-            const { rowCount } = await client.query(
-                `DELETE FROM daily_tasks
-                WHERE id = $1
-                AND user_id = $2`, [task.id, req.user.id]
-            );
-
-            if(rowCount === 0){
-                await client.query('ROLLBACK')
-                return res.status(404).json({ error: `Daily task not found`})
-            }
+        // One DELETE for the whole batch; roll back (404) if any requested id didn't match,
+        // preserving the original all-or-nothing behaviour.
+        const ids = [...new Set(tasks.filter(t => t.id != null).map(t => t.id))];
+        const { rows: deleted } = await client.query(
+            `DELETE FROM daily_tasks WHERE id = ANY($1::int[]) AND user_id = $2 RETURNING id`,
+            [ids, req.user.id]
+        );
+        if (deleted.length !== ids.length) {
+            await client.query('ROLLBACK')
+            return res.status(404).json({ error: `Daily task not found`})
         }
 
         await client.query(`COMMIT`); // End ---
