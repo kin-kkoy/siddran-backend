@@ -182,3 +182,16 @@ CREATE TABLE IF NOT EXISTS daily_completions (
 
 CREATE INDEX IF NOT EXISTS idx_calendar_events_user_range ON calendar_events(user_id, start_at);
 CREATE INDEX IF NOT EXISTS idx_daily_completions_user_date ON daily_completions(user_id, date);
+
+-- Schedule Designer: a "schedule" groups the blocks stamped from a designed weekly timetable so a whole
+-- term can be renamed / recoloured / bulk-deleted as a unit. Stamped blocks carry schedule_id; deleting
+-- a schedule cascades away its blocks. (Standalone blocks have schedule_id NULL — unaffected.)
+CREATE TABLE IF NOT EXISTS schedules (
+    id          SERIAL PRIMARY KEY,
+    user_id     INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    name        VARCHAR(120) NOT NULL,
+    color       VARCHAR(50),
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS schedule_id INTEGER REFERENCES schedules(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_calendar_events_schedule ON calendar_events(schedule_id);

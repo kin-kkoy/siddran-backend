@@ -25,7 +25,7 @@ router.get('/', async (req, res) => {
         let query, values;
 
         if (from && to) {
-            query = `SELECT id, title, description, start_at, end_at, all_day, color, ref_type, ref_id, created_at, updated_at
+            query = `SELECT id, title, description, start_at, end_at, all_day, color, ref_type, ref_id, schedule_id, created_at, updated_at
                 FROM calendar_events
                 WHERE user_id = $1
                 AND start_at < $3
@@ -34,7 +34,7 @@ router.get('/', async (req, res) => {
             values = [req.user.id, from, to];
         } else {
             // No window → return everything for the user (bounded by their own data).
-            query = `SELECT id, title, description, start_at, end_at, all_day, color, ref_type, ref_id, created_at, updated_at
+            query = `SELECT id, title, description, start_at, end_at, all_day, color, ref_type, ref_id, schedule_id, created_at, updated_at
                 FROM calendar_events
                 WHERE user_id = $1
                 ORDER BY start_at ASC`;
@@ -76,7 +76,7 @@ router.post('/', strictLimiter, async (req, res) => {
         const { rows } = await pool.query(
             `INSERT INTO calendar_events (user_id, title, description, start_at, end_at, all_day, color, ref_type, ref_id)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-             RETURNING id, title, description, start_at, end_at, all_day, color, ref_type, ref_id, created_at, updated_at`,
+             RETURNING id, title, description, start_at, end_at, all_day, color, ref_type, ref_id, schedule_id, created_at, updated_at`,
             [
                 req.user.id,
                 title.trim(),
@@ -142,7 +142,7 @@ router.put('/:id', contentUpdateLimiter, async (req, res) => {
             `UPDATE calendar_events
              SET ${sets.join(', ')}, updated_at = CURRENT_TIMESTAMP
              WHERE id = ${idParam} AND user_id = ${userParam}
-             RETURNING id, title, description, start_at, end_at, all_day, color, ref_type, ref_id, created_at, updated_at`,
+             RETURNING id, title, description, start_at, end_at, all_day, color, ref_type, ref_id, schedule_id, created_at, updated_at`,
             values
         );
 
