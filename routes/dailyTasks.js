@@ -298,11 +298,12 @@ router.put('/:id', contentUpdateLimiter, async (req, res) => {
     const { id } = req.params;
     const { title, priority, is_completed, recurrence, time } = req.body;
 
-    // recurrence is normalized only when explicitly provided, so an undefined recurrence
-    // leaves the stored value untouched (COALESCE), while passing one updates it.
-    const recurrenceParam = recurrence === undefined ? undefined : normalizeRecurrence(recurrence);
-    // `time` must support being explicitly CLEARED to null (untimed daily) — COALESCE can't tell
-    // absent from null, so set it directly only when the key is present in the body.
+    // recurrence + time must support being explicitly CLEARED to null (one-off / untimed daily) —
+    // COALESCE can't tell "absent" from "null", so set them via a present-key flag instead. A null
+    // recurrence turns a recurring daily back into a one-off.
+    const recurrenceProvided = Object.prototype.hasOwnProperty.call(req.body, 'recurrence');
+    const recurrenceParam = recurrenceProvided ? normalizeRecurrence(recurrence) : null;
+    const clearingRecurrence = recurrenceProvided && recurrenceParam === null; // recurring → one-off
     const timeProvided = Object.prototype.hasOwnProperty.call(req.body, 'time');
 
     try {
@@ -311,14 +312,16 @@ router.put('/:id', contentUpdateLimiter, async (req, res) => {
              SET title = COALESCE($1, title),
                  priority = COALESCE($2, priority),
                  is_completed = COALESCE($3, is_completed),
-                 recurrence = COALESCE($4, recurrence),
-                 time = CASE WHEN $5 THEN $6 ELSE time END,
+                 recurrence = CASE WHEN $4 THEN $5 ELSE recurrence END,
+                 time = CASE WHEN $6 THEN $7 ELSE time END,
+                 -- un-recurring revives a (likely long-expired) recurring row: give it a fresh 24h life
+                 expires_at = CASE WHEN $8 THEN NOW() + INTERVAL '24 hours' ELSE expires_at END,
                  updated_at = CURRENT_TIMESTAMP
-             WHERE id = $7
-             AND user_id = $8
+             WHERE id = $9
+             AND user_id = $10
              AND (expires_at > NOW() OR recurrence IS NOT NULL)
              RETURNING id, title, priority, is_completed, created_at, updated_at, expires_at, recurrence, time`,
-             [title?.trim(), priority, is_completed, recurrenceParam, timeProvided, timeProvided ? (time ?? null) : null, id, req.user.id]
+             [title?.trim(), priority, is_completed, recurrenceProvided, recurrenceParam, timeProvided, timeProvided ? (time ?? null) : null, clearingRecurrence, id, req.user.id]
         )
 
         if(rows.length === 0) return res.status(404).json({error: 'List of daily tasks not found or expired already'})
