@@ -191,7 +191,9 @@ CREATE TABLE IF NOT EXISTS schedules (
     user_id     INTEGER REFERENCES users(id) ON DELETE CASCADE,
     name        VARCHAR(120) NOT NULL,
     color       VARCHAR(50),
+    template    JSONB,   -- the designed weekly pattern, so a schedule can be re-opened/re-stamped
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS template JSONB;  -- for DBs created before the column existed
 ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS schedule_id INTEGER REFERENCES schedules(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS idx_calendar_events_schedule ON calendar_events(schedule_id);

@@ -17,7 +17,7 @@ const MAX_EVENTS = 500
 router.get('/', async (req, res) => {
     try {
         const { rows } = await pool.query(
-            `SELECT s.id, s.name, s.color, s.created_at, COUNT(e.id)::int AS block_count
+            `SELECT s.id, s.name, s.color, s.template, s.created_at, COUNT(e.id)::int AS block_count
              FROM schedules s
              LEFT JOIN calendar_events e ON e.schedule_id = s.id
              WHERE s.user_id = $1
@@ -34,7 +34,7 @@ router.get('/', async (req, res) => {
 
 // Create a named schedule + bulk-insert its stamped blocks in ONE transaction.
 router.post('/', strictLimiter, async (req, res) => {
-    const { name, color, events } = req.body
+    const { name, color, events, template } = req.body
     if (!name || !name.trim()) return res.status(400).json({ error: 'A schedule name is required' })
     if (!Array.isArray(events) || events.length === 0) return res.status(400).json({ error: 'An events array is required' })
     if (events.length > MAX_EVENTS) return res.status(400).json({ error: `Too many blocks (max ${MAX_EVENTS})` })
@@ -49,9 +49,9 @@ router.post('/', strictLimiter, async (req, res) => {
         await client.query('BEGIN')
 
         const { rows: sRows } = await client.query(
-            `INSERT INTO schedules (user_id, name, color) VALUES ($1, $2, $3)
-             RETURNING id, name, color, created_at`,
-            [req.user.id, name.trim(), color || null]
+            `INSERT INTO schedules (user_id, name, color, template) VALUES ($1, $2, $3, $4)
+             RETURNING id, name, color, template, created_at`,
+            [req.user.id, name.trim(), color || null, template ? JSON.stringify(template) : null]
         )
         const schedule = sRows[0]
 
@@ -105,6 +105,57 @@ router.put('/:id', contentUpdateLimiter, async (req, res) => {
 
         await client.query('COMMIT')
         res.json({ schedule: rows[0] })
+    } catch (error) {
+        if (client) { try { await client.query('ROLLBACK') } catch { /* connection already broken */ } }
+        logger.error(error)
+        res.status(500).json({ error: 'Failed to update schedule' })
+    } finally {
+        if (client) client.release()
+    }
+})
+
+// Edit (in-place): replace ALL of a schedule's blocks with a freshly-stamped set, and update its
+// name / colour / template — in ONE transaction. Used by the Designer's "Edit" flow.
+router.put('/:id/restamp', strictLimiter, async (req, res) => {
+    const { id } = req.params
+    const { name, color, events, template } = req.body
+    if (!Array.isArray(events) || events.length === 0) return res.status(400).json({ error: 'An events array is required' })
+    if (events.length > MAX_EVENTS) return res.status(400).json({ error: `Too many blocks (max ${MAX_EVENTS})` })
+    for (const e of events) {
+        if (!e.title || !e.start_at) return res.status(400).json({ error: 'Each block needs a title and start_at' })
+        if (e.ref_type != null && !REF_TYPES.includes(e.ref_type)) return res.status(400).json({ error: 'Invalid ref_type' })
+    }
+    const recolor = Object.prototype.hasOwnProperty.call(req.body, 'color')
+
+    let client
+    try {
+        client = await pool.connect()
+        await client.query('BEGIN')
+
+        const { rows: sRows } = await client.query(
+            `UPDATE schedules
+             SET name = COALESCE($1, name), color = CASE WHEN $2 THEN $3 ELSE color END, template = COALESCE($4, template)
+             WHERE id = $5 AND user_id = $6
+             RETURNING id, name, color, template, created_at`,
+            [name?.trim(), recolor, recolor ? (color || null) : null, template ? JSON.stringify(template) : null, id, req.user.id]
+        )
+        if (sRows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Schedule not found' }) }
+
+        await client.query(`DELETE FROM calendar_events WHERE schedule_id = $1 AND user_id = $2`, [id, req.user.id])
+
+        const created = []
+        for (const e of events) {
+            const { rows } = await client.query(
+                `INSERT INTO calendar_events (user_id, title, description, start_at, end_at, all_day, color, ref_type, ref_id, schedule_id)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 RETURNING id, title, description, start_at, end_at, all_day, color, ref_type, ref_id, schedule_id, created_at, updated_at`,
+                [req.user.id, e.title.trim(), e.description?.trim() || null, e.start_at, e.end_at || null, e.all_day ?? false, e.color || null, e.ref_type || null, e.ref_type ? (e.ref_id ?? null) : null, id]
+            )
+            created.push(rows[0])
+        }
+
+        await client.query('COMMIT')
+        res.json({ schedule: { ...sRows[0], block_count: created.length }, events: created })
     } catch (error) {
         if (client) { try { await client.query('ROLLBACK') } catch { /* connection already broken */ } }
         logger.error(error)
