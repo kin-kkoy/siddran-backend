@@ -301,6 +301,9 @@ router.put('/:id', contentUpdateLimiter, async (req, res) => {
     // recurrence is normalized only when explicitly provided, so an undefined recurrence
     // leaves the stored value untouched (COALESCE), while passing one updates it.
     const recurrenceParam = recurrence === undefined ? undefined : normalizeRecurrence(recurrence);
+    // `time` must support being explicitly CLEARED to null (untimed daily) — COALESCE can't tell
+    // absent from null, so set it directly only when the key is present in the body.
+    const timeProvided = Object.prototype.hasOwnProperty.call(req.body, 'time');
 
     try {
         const {rows} = await pool.query(
@@ -309,13 +312,13 @@ router.put('/:id', contentUpdateLimiter, async (req, res) => {
                  priority = COALESCE($2, priority),
                  is_completed = COALESCE($3, is_completed),
                  recurrence = COALESCE($4, recurrence),
-                 time = COALESCE($5, time),
+                 time = CASE WHEN $5 THEN $6 ELSE time END,
                  updated_at = CURRENT_TIMESTAMP
-             WHERE id = $6
-             AND user_id = $7
+             WHERE id = $7
+             AND user_id = $8
              AND (expires_at > NOW() OR recurrence IS NOT NULL)
              RETURNING id, title, priority, is_completed, created_at, updated_at, expires_at, recurrence, time`,
-             [title?.trim(), priority, is_completed, recurrenceParam, time, id, req.user.id]
+             [title?.trim(), priority, is_completed, recurrenceParam, timeProvided, timeProvided ? (time ?? null) : null, id, req.user.id]
         )
 
         if(rows.length === 0) return res.status(404).json({error: 'List of daily tasks not found or expired already'})
