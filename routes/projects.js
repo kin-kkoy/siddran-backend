@@ -276,23 +276,19 @@ router.post('/:projectId/tasks', strictLimiter, async (req, res) => {
         );
         if(parseInt(project.rows[0].count) === 0) return res.status(400).json({error: "You do not own this project"});
 
-        // get all current tasks and the count
-        const taskCount = await pool.query(
-            `SELECT COUNT(*) FROM project_tasks
+        // One read of the existing tasks serves BOTH the 30-task limit and the priority base
+        // (was a separate COUNT(*) and then a SELECT priority over the same rows). Select the
+        // FULL row, not just priority — these rows are returned to the client as the bundle's
+        // task list, so priority-only rows showed up with no id/title (missing key + blank name).
+        const allTasks = await pool.query(
+            `SELECT ${TASK_RETURNING} FROM project_tasks
              WHERE project_id = $1`, [projectId]
         );
-        if(parseInt(taskCount.rows[0].count) >= 30) return res.status(400).json({error: "You have reached the maximum number of tasks for this project"}); // "Upgrade to premium to add more or unlimited!"
+        if(allTasks.rows.length >= 30) return res.status(400).json({error: "You have reached the maximum number of tasks for this project"}); // "Upgrade to premium to add more or unlimited!"
 
-        
         client = await pool.connect();
         await client.query(`BEGIN`);
-
-
-        // store all tasks with the created ones appended incrementally
-        const allTasks = await client.query(
-            `SELECT priority FROM project_tasks
-             WHERE project_id = $1`, [projectId]
-        );
+        // (created tasks are appended to allTasks.rows below, then the project's priority is recomputed)
 
 
         const valid = tasks.filter(t => t.title && t.title.trim().length > 0);
@@ -402,7 +398,9 @@ router.put('/:projectId/tasks', contentUpdateLimiter, async (req, res) => {
         }
 
         await client.query(`COMMIT`)
-        res.status(200).json({ allTasks })
+        // Include the recomputed project (priority) so the client can update the bundle's displayed
+        // priority, not just its task list.
+        res.status(200).json({ ...prioUpdate.rows[0], allTasks })
 
     } catch (error) {
         if (client) { try { await client.query(`ROLLBACK`) } catch { /* connection already broken */ } }
