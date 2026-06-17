@@ -46,21 +46,12 @@ const clearLoginAttempts = (username) => {
 // Helper function: cleaup for the old tokens, used by the function after this
 const cleanExpiredTokens = async (userId) => {
     try {
-        // 2 parts to delete: expired tokens, revoked tokens that are older than 30 days
-
-        // delete expired tokens
+        // One DELETE covers both cases: expired tokens, and revoked tokens older than 30 days.
         await pool.query(
             `DELETE FROM refresh_tokens
              WHERE user_id = $1
-             AND expires_at < NOW()`, [userId]
-        )
-
-        // delete revoked tokens
-        await pool.query(
-            `DELETE FROM refresh_tokens
-             WHERE user_id = $1
-             AND revoked = TRUE
-             AND created_at < NOW() - INTERVAL '30 days'`, [userId]
+             AND (expires_at < NOW()
+                  OR (revoked = TRUE AND created_at < NOW() - INTERVAL '30 days'))`, [userId]
         )
 
     } catch (error) {
@@ -85,26 +76,18 @@ const generateTokens = async (userId, username) => {
     )
 
 
-    //  limits the amount of tokens a user can have (for multiple devices) to 5 only
-    const tokenCount = await pool.query(
-        `SELECT COUNT(*)
-         FROM refresh_tokens
-         WHERE user_id = $1
-         AND revoked = FALSE`, [userId]
+    //  Cap a user's active (non-revoked) refresh tokens at 5 (one per device): keep the 4 newest
+    //  and drop any older ones in a single statement, so after the INSERT below there are <= 5.
+    await pool.query(
+        `DELETE FROM refresh_tokens
+         WHERE user_id = $1 AND revoked = FALSE
+         AND id NOT IN (
+            SELECT id FROM refresh_tokens
+            WHERE user_id = $1 AND revoked = FALSE
+            ORDER BY created_at DESC
+            LIMIT 4
+         )`, [userId]
     )
-
-    if(parseInt(tokenCount.rows[0].count) >= 5){
-        // delete oldest token
-        await pool.query(
-            `DELETE FROM refresh_tokens
-             WHERE id = (
-                SELECT id FROM refresh_tokens
-                WHERE user_id = $1 AND revoked = FALSE
-                ORDER BY created_at ASC
-                LIMIT 1
-             )`, [userId]
-        )
-    }
 
 
     //  Creating refresh token
@@ -195,7 +178,7 @@ router.post('/login', authLimiter, async (req, res) => {
 
     try {
         const getUser = await pool.query(
-            `SELECT *
+            `SELECT id, username, password_hash
             FROM users
             WHERE username = $1`, [username]
         )
