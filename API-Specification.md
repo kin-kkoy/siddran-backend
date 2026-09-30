@@ -1,4 +1,4 @@
-# Ember API Specification
+# Siddran API Specification
 
 Base URL: `/` (e.g. `http://localhost:3000` locally, or your Vercel deployment URL)
 
@@ -16,7 +16,7 @@ Check if the API is running. Not rate-limited.
 
 **Response** `200`
 ```json
-{ "status": "ok", "message": "Ember API is running" }
+{ "status": "ok", "message": "Siddran API is running" }
 ```
 
 ---

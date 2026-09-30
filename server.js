@@ -80,7 +80,7 @@ app.use(morgan(':date[iso] :method :url :status :response-time ms - :res[content
 // Health check endpoint (pings the server to checks if it's alive or not)
 // IMPORTANT: This must be BEFORE rate limiter so deployment platforms (e.g., Render) can ping it without getting rate-limited
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', message: 'Ember API is running' });
+  res.json({ status: 'ok', message: 'Siddran API is running' });
 });
 
 app.use(generalLimiter);
